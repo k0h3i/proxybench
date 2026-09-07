@@ -3,6 +3,7 @@
 import argparse
 from datetime import datetime, timezone
 import hashlib
+from http.client import HTTPException
 import json
 from pathlib import Path
 import re
@@ -53,10 +54,26 @@ class SecClient:
         metadata = destination.with_name(destination.name + ".retrieval.json")
         event = {"accession": accession, "url": url, "attempted_at": utc_now()}
         log = self.root / "data/manifests/retrieval-log.jsonl"
-        if destination.exists():
-            digest = hashlib.sha256(destination.read_bytes()).hexdigest()
-            saved = json.loads(metadata.read_text()) if metadata.exists() else {}
-            if saved.get("sha256") != digest or saved.get("url") != url:
+        if destination.exists() or metadata.exists():
+            if not (destination.exists() and metadata.exists()):
+                event.update(outcome="incomplete_cache", stage="cache_validation",
+                             source_exists=destination.exists(), metadata_exists=metadata.exists())
+                append_jsonl(log, event)
+                raise ValueError("Incomplete cache pair. Preserve both paths and inspect before recovery.")
+            try:
+                digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+                saved = json.loads(metadata.read_text())
+            except OSError as error:
+                event.update(outcome="storage_error", stage="cache_read", error=str(error))
+                append_jsonl(log, event)
+                raise
+            except ValueError as error:
+                event.update(outcome="invalid_cache", stage="cache_validation", error=str(error))
+                append_jsonl(log, event)
+                raise ValueError("Invalid cache metadata. Preserve and inspect the source and metadata.") from error
+            if not isinstance(saved, dict) or saved.get("sha256") != digest or saved.get("url") != url:
+                event.update(outcome="invalid_cache", stage="cache_validation")
+                append_jsonl(log, event)
                 raise ValueError("Cache metadata or hash mismatch. Preserve and inspect the source.")
             event.update(outcome="cache_hit", sha256=digest, path=str(destination.relative_to(self.root)))
             append_jsonl(log, event)
@@ -68,6 +85,7 @@ class SecClient:
         time.sleep(max(0.0, self.next_request - time.monotonic()))
         self.next_request = time.monotonic() + self.interval
         request = Request(url, headers={"User-Agent": self.identity, "Accept-Encoding": "identity"})
+        stage = "transport"
         try:
             with self.opener(request, timeout=45) as response:
                 content = response.read()
@@ -82,6 +100,7 @@ class SecClient:
                 self.stopped = True
                 event.update(outcome="rejected_response", http_status=status)
             else:
+                stage = "source_write"
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 with destination.open("xb") as stream:
                     stream.write(content)
@@ -89,15 +108,19 @@ class SecClient:
                              content_type=content_type, bytes=len(content),
                              sha256=hashlib.sha256(content).hexdigest(),
                              path=str(destination.relative_to(self.root)))
-                metadata.write_text(json.dumps(event, indent=2) + "\n", encoding="utf-8")
+                stage = "metadata_write"
+                with metadata.open("x", encoding="utf-8") as stream:
+                    stream.write(json.dumps(event, indent=2) + "\n")
         except HTTPError as error:
             event.update(outcome="http_error", http_status=error.code,
                          retry_after=error.headers.get("Retry-After") if error.headers else None)
             if error.code in (403, 429):
                 self.stopped = True
             error.close()
-        except (URLError, TimeoutError, OSError) as error:
-            event.update(outcome="network_error", error=str(error))
+        except (URLError, TimeoutError, OSError, HTTPException) as error:
+            event.update(outcome="network_error" if stage == "transport" else "storage_error",
+                         stage=stage, error=str(error), source_exists=destination.exists(),
+                         metadata_exists=metadata.exists())
         except ValueError as error:
             event.update(outcome="rejected_response", error=str(error))
         append_jsonl(log, event)

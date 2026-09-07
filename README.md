@@ -2,7 +2,12 @@
 
 ProxyBench studies extraction of historical SEC Form N-PX proxy-voting records. It tests whether modern structured filings provide useful supervision for a small fine-tuned model. Later stages add proposal categorization and links to issuer ballot items.
 
-This repository contains a Python package structure, source retrieval and packet helpers, and project documentation. The extraction pipeline and training code are not implemented yet. Source exploration is underway, with local results kept outside Git. Annotation calibration will establish labeling rules through examples.
+This repository contains source retrieval, review, record validation, and scoring helpers.
+The [benchmark implementation guide](docs/benchmark-implementation.md) describes the current interfaces and limits.
+A bounded HTML parser and development runner now preserve and score fragment outputs.
+The [extractor guide](docs/extractor-runner.md) explains their rules and limits.
+Comparative evaluation and training retain separate review gates.
+Local pilot labels and conversion candidates stay outside Git.
 
 ## Repository layout
 
@@ -12,7 +17,7 @@ The Python package lives under `src/proxybench/`. Shared documentation lives und
 |---|---|
 | `AGENTS.md` | Repository instructions for coding agents |
 | `src/proxybench/` | Source retrieval, normalization, extraction, annotation, evaluation, and later training |
-| `tests/` | Future behavior tests and small shareable fixtures |
+| `tests/` | Behavior tests and small synthetic fixtures |
 | `configs/` | Shareable experiment configuration |
 | `docs/` | Shared project and repository documentation |
 | `data/` | Local source documents, prepared inputs, labels, and manifests |

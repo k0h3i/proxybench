@@ -26,6 +26,30 @@ The helper reuses unchanged cached sources and never overwrites an existing sour
 An HTTP 403 or 429 response stops further downloads in that client session.
 Inspect a denial before starting another client session.
 
+## Recover an incomplete cache
+
+A cache pair contains original source bytes and their retrieval metadata.
+Interrupted response bodies produce a transport failure record.
+Source or metadata write failures produce `storage_error` with the failed stage.
+If the retrieval log is unwritable, the helper raises that error.
+
+Preserve incomplete pairs until an explicit inspection decision records their disposition.
+The helper refuses missing, malformed, or mismatched cache metadata.
+It never promotes unverified source bytes into a trusted cache.
+
+Use this recovery procedure:
+
+1. Preserve the existing source, metadata, and retrieval log at their current paths.
+2. Record their paths, lengths, and hashes in a new local recovery note.
+3. Inspect the failed stage and any recorded expected hash against the preserved bytes.
+4. Record the reviewer, reason, and decision before admitting any recovered source.
+5. If a fresh download is needed, use a new directory through `--root` after reviewing current SEC access guidance.
+6. Retain the earlier cache pair when a reviewed inventory begins using the new source version.
+
+Do not reconstruct successful metadata solely because a source file exists.
+The new root stores a separate source archive and retrieval log.
+No automatic recovery command replaces the original pair.
+
 ## Prepare inspected source ranges
 
 The `proxybench.annotation.packets.prepare_packet` function takes ordered source ranges and one target range.
@@ -46,23 +70,33 @@ The function rejects overlapping ranges, incomplete target coverage, and replace
 It does not determine whether a physical row represents one logical record.
 It does not fill extraction fields or create reference labels.
 
-## Open the first review page
+## Prepare a new development review page
 
 The local packet set can supply a browser review page with a timer and optional hidden assistant drafts.
 The page runs from a local HTML file without a server.
 It exports draft annotations and active review time to a numbered JSON download.
 
 ```bash
-PYTHONPATH=src python3 -m proxybench.annotation.review
-
-# Include preserved assistant drafts for a source-then-reveal review.
 PYTHONPATH=src python3 -m proxybench.annotation.review \
-  --drafts artifacts/runs/calibration-assistant-v1/draft-labels.json
+  --packet-directory data/packets/review-v2 \
+  --drafts artifacts/runs/review-v2/draft-labels.json
 ```
 
-The command reads `data/packets/calibration/packet-set.json` and writes `data/packets/calibration/index.html`.
-It requires an existing inspected packet set.
-When drafts are supplied, the command matches their source identities, context ranges, packet versions, and field checklist before building the page.
+Replace the example paths with a new inspected review version.
+The command reads `packet-set.json` and creates `index.html` in the selected directory.
+It refuses an existing page and leaves historical pages unchanged.
+Omit `--drafts` when the review has no suggestions.
+
+Each packet requires its original `manifest`, `source_view`, and exact source-only `model_input` text.
+The manifest must identify the split as `development`.
+`annotation.bindings.review_binding(packet)` computes the binding for a suggestion's `input_binding` field.
+A binding records the hashes of the manifest, displayed source, and model input.
+Suggestions also require their existing `packet_fingerprint`, source identity, packet version, and complete field checklist.
+
+Saved drafts and revealed suggestions must match the entire binding before reuse.
+Changed targets, context ranges, displayed text, or model input invalidate automatic reuse.
+Legacy drafts without a binding require a reviewed new version.
+Preserve their original files instead of adding an unreviewed binding to them.
 Open the generated page in a browser and start the timer before reading the sources or guide.
 
 Read the source and form an answer before selecting `Reveal draft labels`.
@@ -72,7 +106,7 @@ The export preserves the original suggestions, reveal times, earlier answers, an
 Assistant suggestions do not become accepted reference labels automatically.
 
 The visible name `Reporting fund or fund group` distinguishes the reporting fund from the issuer.
-Existing saved drafts retain the key `reporting_scope`.
+New and historical drafts retain the key `reporting_scope`.
 Preserve raw dates and document any assumed date order separately from source facts.
 The first pilot uses month/day/year or year-month-day, with ambiguous interpretations marked `INFERRED`.
 This pilot convention does not establish an SEC-wide rule.
@@ -85,8 +119,15 @@ Keep at least 30 minutes of the total budget for corrections.
 Download the draft when you stop, even if some fields remain unreviewed.
 Preserve that file when importing reviewed versions into `data/annotations/calibration/`.
 The browser stores only the current working draft, so downloaded revisions preserve earlier decisions.
-Resuming a downloaded draft retains its active time and source identities.
-Draft field values retain source wording and require review before conversion to the final record schema.
+Resuming a matching draft retains its active time and input binding.
+Answer values and original source wording occupy separate boxes.
+Value edits preserve source wording and append the earlier value to correction history.
+Record correction reasons in the feedback box before marking the packet reviewed.
+These development drafts still require reviewed conversion before typed reference admission.
+
+This page retains the first pilot's reveal procedure and refuses test packets.
+Future test review must save a source-only initial answer before revealing suggestions.
+That procedure needs a separate annotation allocation.
 
 ## Validate the helpers
 

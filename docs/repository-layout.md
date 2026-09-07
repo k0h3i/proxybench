@@ -1,6 +1,9 @@
 # Repository layout
 
-ProxyBench uses a Python source layout, with package code under `src/`. This separates importable code from tests and local files. The initial packages reserve module boundaries without implementing the pipeline.
+ProxyBench uses a Python source layout, with package code under `src/`.
+This separates importable code from tests and local files.
+Source, review, record validation, and scoring helpers now implement parts of the pipeline.
+The [benchmark implementation guide](benchmark-implementation.md) describes their interfaces.
 
 ## Package boundaries
 
@@ -14,6 +17,7 @@ The package follows the reviewed extraction architecture. Add behavior to the pa
 | `proxybench.extraction` | Record segmentation, extraction adapters, and mechanical validation |
 | `proxybench.annotation` | Review packets, source-first labeling, and annotation history |
 | `proxybench.evaluation` | Common normalization, scoring, comparison protocols, and error reports |
+| `proxybench.execution` | Development schedules, subprocess limits, capture, replay, and execution reports |
 | `proxybench.training` | Later supervision generation, data preparation, and fine-tuning |
 
 Categorization and proposal linking remain later stages. Their code will be added after their review gates. They cannot overwrite extracted source facts.
@@ -50,6 +54,7 @@ Keep the current decision sheet and annotation guide under `notes/calibration/`.
 |---|---|
 | `notes/project/` | Scope, specification, and design review |
 | `notes/calibration/` | Annotation guide, results, and decisions |
+| `notes/benchmark/` | Benchmark decisions, frozen definitions, and implementation reports |
 | `notes/handoffs/` | Context for later sessions and historical stage plans |
 | `notes/scripts/` | Local preparation and inspection scripts |
 | `notes/review-imports/` | Original review downloads |

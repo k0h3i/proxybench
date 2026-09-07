@@ -3,20 +3,24 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import re
 
+from proxybench.annotation.bindings import review_binding
 from proxybench.annotation.packets import FIELDS
 from proxybench.annotation.review import load_suggestions, write_review
 
 
 class ReviewTests(unittest.TestCase):
     def fixture(self, root):
-        manifest = {'packet_id': 'synthetic-1', 'packet_version': 1, 'source_sha256': 'synthetic-hash',
+        manifest = {'split': 'development', 'packet_id': 'synthetic-1', 'packet_version': 1, 'source_sha256': 'synthetic-hash',
                     'blocks': [{'block_id': 'B1', 'start_byte': 0, 'end_byte': 10}]}
-        packets = [{'manifest': manifest, 'source_view': '<p>Synthetic source</p>'}]
+        packets = [{'manifest': manifest, 'source_view': '<p>Synthetic source</p>',
+                    'model_input': '<p>Synthetic source</p>'}]
         draft = {'packet_version': 1, 'source_sha256': 'synthetic-hash',
                  'packet_fingerprint': hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
                  'fields': {f: {'value': '', 'raw_text': '', 'availability': 'ABSENT_IN_CONTEXT',
                                 'origin': '', 'evidence_input': 'B1: absent', 'note': ''} for f in FIELDS}}
+        draft['input_binding'] = review_binding(packets[0])
         path = root / 'drafts.json'
         path.write_text(json.dumps({'draft_set_id': 'synthetic-v1', 'packets': {'synthetic-1': draft}}))
         directory = root / 'data/packets/calibration'
@@ -62,3 +66,50 @@ class ReviewTests(unittest.TestCase):
             self.assertIn('id="reveal" class="primary" disabled', page)
             self.assertEqual(source_path.read_bytes(), original)
             self.assertEqual(path.read_bytes(), raw_drafts)
+
+    def test_literal_template_markers_round_trip_in_source_and_drafts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packets, path = self.fixture(root)
+            markers = '__PACKETS__ __FIELDS__ __DRAFTS__ </script><script>literal</script>'
+            packets[0]['source_view'] = '<p>' + markers + '</p>'
+            data = json.loads(path.read_text())
+            data['packets']['synthetic-1']['input_binding'] = review_binding(packets[0])
+            data['packets']['synthetic-1']['fields']['ticker']['note'] = markers
+            path.write_text(json.dumps(data))
+            (root / 'data/packets/calibration/packet-set.json').write_text(json.dumps(packets))
+            page = write_review(root, draft_path=path).read_text()
+            payload = json.loads(re.search(r'<script id="packet-data" type="application/json">(.*?)</script>', page, re.S)[1])
+            drafts = json.loads(re.search(r'<script id="assistant-data" type="application/json">(.*?)</script>', page, re.S)[1])
+            self.assertEqual(payload[0]['source_view'], packets[0]['source_view'])
+            self.assertEqual(drafts['packets']['synthetic-1']['fields']['ticker']['note'], markers)
+            self.assertNotIn('</script><script>literal</script>', page)
+
+    def test_stale_display_and_model_bundle_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            packets, path = self.fixture(Path(directory))
+            for key in ('source_view', 'model_input'):
+                original = packets[0][key]
+                packets[0][key] += 'changed'
+                with self.assertRaises(ValueError):
+                    load_suggestions(path, packets)
+                packets[0][key] = original
+            data = json.loads(path.read_text())
+            del data['packets']['synthetic-1']['input_binding']
+            path.write_text(json.dumps(data))
+            with self.assertRaises(ValueError):
+                load_suggestions(path, packets)
+
+    def test_existing_page_is_preserved_and_test_packets_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packets, path = self.fixture(root)
+            output = write_review(root, draft_path=path)
+            original = output.read_bytes()
+            with self.assertRaises(FileExistsError):
+                write_review(root, draft_path=path)
+            self.assertEqual(output.read_bytes(), original)
+            packets[0]['manifest']['split'] = 'test'
+            (root / 'data/packets/calibration/packet-set.json').write_text(json.dumps(packets))
+            with self.assertRaisesRegex(ValueError, 'development packets only'):
+                write_review(root)
