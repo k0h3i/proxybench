@@ -10,6 +10,7 @@ The Python package lives under `src/proxybench/`. Shared documentation lives und
 
 | Path | Purpose |
 |---|---|
+| `AGENTS.md` | Repository instructions for coding agents |
 | `src/proxybench/` | Source retrieval, normalization, extraction, annotation, evaluation, and later training |
 | `tests/` | Future behavior tests and small shareable fixtures |
 | `configs/` | Shareable experiment configuration |
