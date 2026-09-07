@@ -6,12 +6,13 @@ Follow the current user instructions over the conventions in this file. Complete
 
 Read [README.md](README.md) and the [repository guide](docs/repository-layout.md). Inspect the current code and Git status before making changes. Do not assume that planned components already exist.
 
-If local planning notes exist, read the relevant documents:
+If local planning notes exist, start with `notes/README.md` and follow its current-work links.
+Read the relevant project documents:
 
-- `notes/project-brief.md`: Agreed scope, hardware constraints, and project status.
-- `notes/proxybench-spec.md`: Data contracts, evaluation rules, and stage gates.
-- `notes/proxybench-review.md`: Independent review findings and design decisions.
-- `notes/next-stage-source-exploration-and-calibration.md`: Initial source exploration and calibration plan.
+- `notes/project/project-brief.md`: Agreed scope, hardware constraints, and project status.
+- `notes/project/proxybench-spec.md`: Data contracts, evaluation rules, and stage gates.
+- `notes/project/proxybench-review.md`: Independent review findings and design decisions.
+- `notes/handoffs/next-stage-source-exploration-and-calibration.md`: Initial source exploration and calibration plan.
 
 The root `notes/` directory is Git-ignored and absent from a fresh clone. Continue work supported by shared documentation when notes are unavailable. Request missing context only when it changes the task or prevents correct work.
 

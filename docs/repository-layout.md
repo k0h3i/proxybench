@@ -38,3 +38,23 @@ Shared files include source code, tests, public documentation, and example confi
 The guides `data/README.md` and `artifacts/README.md` remain eligible for tracking. Empty local subdirectories are not stored by Git. Create the needed directories when preparing a stage.
 
 Keep reusable operating documentation in `docs/`. Keep working notes in `notes/`. If a note supplies instructions needed by other contributors, write a shared guide instead of linking to the ignored note.
+
+
+## Local note organization
+
+When local notes exist, use `notes/README.md` as the starting point.
+The index identifies current work and links to the relevant decisions.
+Keep the current decision sheet and annotation guide under `notes/calibration/`.
+
+| Local folder | Purpose |
+|---|---|
+| `notes/project/` | Scope, specification, and design review |
+| `notes/calibration/` | Annotation guide, results, and decisions |
+| `notes/handoffs/` | Context for later sessions and historical stage plans |
+| `notes/scripts/` | Local preparation and inspection scripts |
+| `notes/review-imports/` | Original review downloads |
+| `notes/private/` | Local contact details and other private configuration |
+
+Run local scripts from the repository root.
+Use `notes/relocations.json` to resolve old paths in preserved generated records.
+Keep this local organization outside ordinary commits through the existing ignore rule.

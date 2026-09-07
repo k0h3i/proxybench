@@ -2,7 +2,7 @@
 
 ProxyBench studies extraction of historical SEC Form N-PX proxy-voting records. It tests whether modern structured filings provide useful supervision for a small fine-tuned model. Later stages add proposal categorization and links to issuer ballot items.
 
-This repository currently contains a Python package structure and project documentation. The extraction pipeline and training code are not implemented yet. The next stage is source exploration and annotation calibration, which establishes labeling rules through examples.
+This repository contains a Python package structure, source retrieval and packet helpers, and project documentation. The extraction pipeline and training code are not implemented yet. Source exploration is underway, with local results kept outside Git. Annotation calibration will establish labeling rules through examples.
 
 ## Repository layout
 
@@ -19,7 +19,7 @@ The Python package lives under `src/proxybench/`. Shared documentation lives und
 | `artifacts/` | Local model files, run output, and reports |
 | `notes/` | Local plans, specifications, review records, and stage notes |
 
-Read the [repository guide](docs/repository-layout.md) for module boundaries and storage rules. Git retains the usage guides in `data/` and `artifacts/`, but ignores their generated contents. The entire root `notes/` directory is ignored.
+Read the [repository guide](docs/repository-layout.md) for module boundaries and storage rules. Git retains the usage guides in `data/` and `artifacts/`, but ignores their generated contents. The entire root `notes/` directory is ignored. When local notes exist, start with `notes/README.md` for current work.
 
 ## Package setup
 
@@ -33,4 +33,4 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-The package has no command-line entry point yet. Add runnable components during the relevant project stage. Keep environment-specific values and SEC contact information outside shared configuration.
+The package has no installed command-line entry point yet. The [source calibration guide](docs/source-calibration-tools.md) describes the retrieval module and packet helper. Keep environment-specific values and SEC contact information outside shared configuration.
