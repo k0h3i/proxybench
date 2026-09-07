@@ -1,0 +1,36 @@
+# Local planning and review notes.
+/notes/
+
+# Local datasets and experiment output. Keep their usage guides.
+/data/*
+!/data/README.md
+/artifacts/*
+!/artifacts/README.md
+
+# Local agent state.
+/.agents/
+/.codex/
+
+# Python environments, caches, and packaging output.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local credentials and editor files.
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
