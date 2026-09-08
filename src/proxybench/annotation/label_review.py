@@ -20,7 +20,8 @@ def render(output, targets, report, *, review_budget):
         raw = raw_path.read_bytes().decode('utf-8', errors='replace') if raw_path.exists() else 'No native final response was captured.'
         source = '\n\n'.join(f'Block {j}\n{b["original_text"]}' for j, b in enumerate(target['bundle']['blocks']))
         ledger.append(dict(input_id=input_id, generated=raw_path.exists(),
-            mechanically_valid=result.get('mechanically_valid', False), source_reviewed=False,
+            mechanically_valid=result.get('mechanically_valid'),
+            execution_eligible=result.get('execution_eligible', False), source_reviewed=False,
             unresolved=True, rejected=False, training_admitted=False, active_seconds=None,
             boundary_review='PENDING', record_multiplicity=None, scope_review='PENDING',
             source_group=target['group_id'], label_revision=None, label_sha256=None,

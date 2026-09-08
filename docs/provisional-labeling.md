@@ -33,6 +33,9 @@ Retain unresolved duplicate relationships and review the logical record count be
 It freezes the contract, prompts, model cache, executable hashes, and Python source hashes.
 The separate comparison controller retains its existing medium-effort behavior.
 The new controller requests `gpt-5.6-sol` at low effort through subscription authentication.
+The frozen task explicitly prohibits tools, including tools for citation arithmetic.
+Disabled tools can still receive attempted calls from the model.
+The controller rejects those attempts even when the tool host denies execution.
 
 Execution starts with a filesystem isolation test and one synthetic configuration probe.
 The probe must record the requested model, effort, exact prompt, and native final response.

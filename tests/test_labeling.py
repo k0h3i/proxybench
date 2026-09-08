@@ -49,6 +49,8 @@ class LabelingTests(unittest.TestCase):
             run = self.frozen(root)
             self.assertEqual(json.loads((run/'manifest.json').read_bytes())['effort'], 'low')
             self.assertNotIn('reference', (run/'schedule.json').read_text())
+            self.assertTrue((run/'delivery/0/prompt.bin').read_bytes().startswith(l.TASK))
+            self.assertIn(b'Do not use tools', (run/'task.txt').read_bytes())
             with self.assertRaises(l.IntegrityError):
                 l.freeze(run, [b'{}'], contract=b'', cli=sys.executable,
                          model_cache=root/'models.json', authorization='synthetic')
