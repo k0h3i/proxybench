@@ -1,54 +1,8 @@
-# Source calibration tools
+# Local source review
 
-These helpers support the first local source review.
-They do not implement filing discovery, automatic record extraction, or evaluation.
-Source selection and logical target boundaries still require inspection.
-
-## Retrieve selected source documents
-
-Before retrieval, read the current [SEC access guidance](https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data).
-Supply a real client name and contact email in a local file such as `notes/private/sec-identity.txt`.
-Keep the file outside Git.
-
-The retrieval command takes an accession, which identifies one filing submission, and its document URL.
-It preserves the source under `data/raw/<accession>/` with a hash and retrieval metadata.
-It records requests under `data/manifests/retrieval-log.jsonl`.
-
-```bash
-PYTHONPATH=src python3 -m proxybench.sources.sec \
-  ACCESSION SEC_DOCUMENT_URL --identity-file notes/private/sec-identity.txt
-```
-
-Replace `ACCESSION` and `SEC_DOCUMENT_URL` with the inspected filing references.
-Use one sequential `SecClient` instance when retrieving several documents through Python.
-Do not run concurrent clients.
-The helper reuses unchanged cached sources and never overwrites an existing source.
-An HTTP 403 or 429 response stops further downloads in that client session.
-Inspect a denial before starting another client session.
-
-## Recover an incomplete cache
-
-A cache pair contains original source bytes and their retrieval metadata.
-Interrupted response bodies produce a transport failure record.
-Source or metadata write failures produce `storage_error` with the failed stage.
-If the retrieval log is unwritable, the helper raises that error.
-
-Preserve incomplete pairs until an explicit inspection decision records their disposition.
-The helper refuses missing, malformed, or mismatched cache metadata.
-It never promotes unverified source bytes into a trusted cache.
-
-Use this recovery procedure:
-
-1. Preserve the existing source, metadata, and retrieval log at their current paths.
-2. Record their paths, lengths, and hashes in a new local recovery note.
-3. Inspect the failed stage and any recorded expected hash against the preserved bytes.
-4. Record the reviewer, reason, and decision before admitting any recovered source.
-5. If a fresh download is needed, use a new directory through `--root` after reviewing current SEC access guidance.
-6. Retain the earlier cache pair when a reviewed inventory begins using the new source version.
-
-Do not reconstruct successful metadata solely because a source file exists.
-The new root stores a separate source archive and retrieval log.
-No automatic recovery command replaces the original pair.
+Use existing local source documents to prepare editable browser reviews.
+Sol supplies draft labels, and the user reviews the source and corrects each draft.
+Browser completion does not by itself approve a label for training.
 
 ## Prepare inspected source ranges
 
@@ -95,8 +49,6 @@ Suggestions also require their existing `packet_fingerprint`, source identity, p
 
 Saved drafts and revealed suggestions must match the entire binding before reuse.
 Changed targets, context ranges, displayed text, or model input invalidate automatic reuse.
-Legacy drafts without a binding require a reviewed new version.
-Preserve their original files instead of adding an unreviewed binding to them.
 Open the generated page in a browser and start the timer before reading the sources or guide.
 
 Read the source and form an answer before selecting `Reveal draft labels`.
@@ -128,13 +80,3 @@ These development drafts still require reviewed conversion before typed referenc
 This page retains the first pilot's reveal procedure and refuses test packets.
 Future test review must save a source-only initial answer before revealing suggestions.
 That procedure needs a separate annotation allocation.
-
-## Validate the helpers
-
-The tests use synthetic sources and do not contact SEC.
-They cover cached bytes, retrieval failures, source boundaries, and display mappings.
-They do not establish historical coverage or record accuracy.
-
-```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-```

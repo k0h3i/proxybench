@@ -1,1 +1,1 @@
-"""Filing discovery and source document retrieval."""
+"""Read local source documents."""

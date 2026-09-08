@@ -38,10 +38,10 @@ It exercises file import, rejection without state replacement, resume, export co
 The test intercepts downloads and supplies browser `File` objects.
 It does not exercise native file dialogs or native downloads.
 
-The extractor and runner tests use synthetic HTML and bounded local subprocesses.
-They exercise date versions, source mappings, interrupted scopes, split votes, capture integrity, timeouts, and output limits.
-They do not download sources, launch models, or use accepted pilot answers.
+The runner tests use fixed synthetic responses and bounded local subprocesses.
+They cover date rules, capture integrity, timeouts, and output limits.
+The local-input tests cover XML boundaries, sequence masks, and resource limits.
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -p "test_extractor_runner.py" -v
+PYTHONPATH=src python3 -m unittest discover -s tests -p "test_runner.py" -v
 ```

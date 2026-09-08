@@ -12,7 +12,8 @@ Read the relevant project documents:
 - `notes/project/project-brief.md`: Agreed scope, hardware constraints, and project status.
 - `notes/project/proxybench-spec.md`: Data contracts, evaluation rules, and stage gates.
 - `notes/project/proxybench-review.md`: Independent review findings and design decisions.
-- `notes/handoffs/next-stage-source-exploration-and-calibration.md`: Initial source exploration and calibration plan.
+- `notes/training/direct-sol-labeling/plan.md`: Current labeling workflow.
+- `notes/training/direct-sol-labeling/label-contract.md`: Labels supplied to Sol.
 
 The root `notes/` directory is Git-ignored and absent from a fresh clone. Continue work supported by shared documentation when notes are unavailable. Request missing context only when it changes the task or prevents correct work.
 
@@ -66,7 +67,8 @@ Push completed commits to the current branch's configured remote without asking 
 Keep stage approvals separate from Git publication, and preserve the rules for ignored and private files.
 Do not force-push or rewrite shared history without explicit authorization.
 
-Before automated SEC retrieval, establish the client identity and follow current SEC access guidance. Cache retrieved documents and record failures. Do not invent contact information.
+Use the existing local source files for labeling.
+Give Sol the label contract and source context, then use the editable browser for human review.
 
 ## Validate changes and report limits
 
@@ -79,7 +81,7 @@ Match validation to the change:
 - For packaging changes, build the package and inspect its contents.
 - For extraction changes, include meaningful source-boundary and unsupported-value cases.
 
-The initial scaffold has no behavior test suite or command-line entry point. Do not report missing tests as passed. State what changed, what was tested, and what remains unimplemented.
+Run the relevant behavior tests. State what changed, what was tested, and what remains unimplemented.
 
 ## Write in plain English
 

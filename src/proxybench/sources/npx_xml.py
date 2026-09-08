@@ -1,8 +1,6 @@
 """Bounded, non-resolving XML reads with original byte locations."""
 
 from dataclasses import dataclass, field
-from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit
 from xml.parsers import expat
 import hashlib
 
@@ -102,46 +100,3 @@ def parse_xml(raw, *, namespace, root_name, max_bytes=16 * 1024 * 1024,
 def pointer(node, raw, document_id):
     return {"document_id": document_id, "source_sha256": hashlib.sha256(raw).hexdigest(),
             "start_byte": node.start, "end_byte": node.end}
-
-
-def discover_attachments(index_html, index_url):
-    """Read recorded attachment roles, excluding SEC stylesheet representations."""
-    class Index(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.rows, self.cells, self.cell, self.href = [], None, None, None
-
-        def handle_starttag(self, tag, attrs):
-            if tag == "tr":
-                self.cells, self.href = [], None
-            elif tag == "td" and self.cells is not None:
-                self.cell = []
-            elif tag == "a" and self.cell is not None:
-                self.href = dict(attrs).get("href")
-
-        def handle_data(self, data):
-            if self.cell is not None:
-                self.cell.append(data)
-
-        def handle_endtag(self, tag):
-            if tag == "td" and self.cell is not None:
-                self.cells.append("".join(self.cell).strip())
-                self.cell = None
-            elif tag == "tr" and self.cells is not None:
-                if len(self.cells) == 5 and self.href:
-                    self.rows.append((self.cells, self.href))
-                self.cells = None
-
-    parser = Index()
-    parser.feed(index_html)
-    output = []
-    for cells, href in parser.rows:
-        url = urljoin(index_url, href)
-        parts = urlsplit(url)
-        if (cells[3] in {"N-PX", "N-PX/A", "PROXY VOTING RECORD"}
-                and cells[2].lower().endswith(".xml") and parts.path.endswith(".xml")
-                and parts.netloc == "www.sec.gov" and parts.scheme == "https"
-                and parts.path.rsplit("/", 1)[0] == urlsplit(index_url).path.rsplit("/", 1)[0]):
-            output.append({"role": cells[3], "sequence": cells[0], "url": url,
-                           "description": cells[1], "name": cells[2]})
-    return output

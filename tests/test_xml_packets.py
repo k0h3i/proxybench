@@ -6,7 +6,7 @@ import unittest
 from proxybench.annotation.xml_packets import build, project, digest
 from proxybench.sources.npx_xml import XMLRejected
 from proxybench.training.compact import compact_source, decode_evidence
-from test_training_preparation import PRIMARY, ROW, votes
+from test_local_inputs import PRIMARY, ROW, votes
 
 
 class PacketTests(unittest.TestCase):

@@ -2,7 +2,7 @@
 
 The `benchmark-v1` helpers enforce record rules and score preserved responses.
 A reference is a reviewed answer used for scoring.
-The [development runner](extractor-runner.md) captures extraction outputs before calling these helpers.
+The general development runner captures model outputs before calling these helpers.
 Comparative results require a separate execution decision.
 
 The package requires Python 3.11 or later and adds no runtime dependencies.
@@ -111,7 +111,7 @@ It reports precision on countable responses with the response-coverage fraction.
 Unknown prediction counts and zero denominators produce undefined rates.
 These measures do not establish complete historical coverage from fragment fixtures.
 
-## Review and retrieval changes
+## Browser review
 
 The development review page now requires exact manifest, view, and model-input bindings.
 Suggestions and resumed drafts must match those bindings.
@@ -121,7 +121,7 @@ Existing pages and legacy labels retain their bytes.
 
 Source and draft text no longer act as template substitution instructions.
 The page preserves literal template markers and escapes closing-script text.
-The [source tools guide](source-calibration-tools.md) explains the new review arguments and cache recovery procedure.
+The [local review guide](local-review.md) explains the browser review arguments.
 
 `annotation.audit.audit_inventory` compares legacy labels with pinned decision and export artifacts.
 It tests acceptance states, paths, source ranges, hashes, and export consistency.
