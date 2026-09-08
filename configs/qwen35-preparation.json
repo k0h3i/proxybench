@@ -1,0 +1,31 @@
+{
+  "stage": "preparation-only",
+  "model": "Qwen/Qwen3.5-9B",
+  "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+  "inputs": "text-only",
+  "vision": "retain-and-freeze",
+  "context_tokens": 16384,
+  "max_new_tokens": 8192,
+  "thinking": false,
+  "decoding": "greedy",
+  "quantization": "bitsandbytes-nf4-double-quant",
+  "compute_dtype": "bfloat16",
+  "attention": "sdpa",
+  "adapter_suffixes": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+  "lora_rank": 8,
+  "lora_alpha": 16,
+  "learning_rate": 0.0001,
+  "gradient_accumulation": 2,
+  "optimizer": "AdamW",
+  "seed": 42,
+  "packing": false,
+  "loss": "complete-response-only-chunked-vocabulary-projection",
+  "synthetic_optimizer_steps": 2,
+  "limits": {
+    "total_seconds": 28800,
+    "phase_seconds": 1800,
+    "start_host_bytes": 4294967296,
+    "stop_host_bytes": 1073741824,
+    "device_margin_bytes": 2147483648
+  }
+}

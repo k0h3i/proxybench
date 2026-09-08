@@ -6,7 +6,8 @@ This repository contains source retrieval, review, record validation, and scorin
 The [benchmark implementation guide](docs/benchmark-implementation.md) describes the current interfaces and limits.
 A bounded HTML parser and development runner now preserve and score fragment outputs.
 The [extractor guide](docs/extractor-runner.md) explains their rules and limits.
-Comparative evaluation and training retain separate review gates.
+The [comparison controller](docs/comparison-controller.md) runs a frozen parser and Sol schedule with isolated source inputs.
+Training and untouched test evaluation retain separate review gates.
 Local pilot labels and conversion candidates stay outside Git.
 
 ## Repository layout

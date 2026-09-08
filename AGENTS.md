@@ -59,6 +59,13 @@ Keep notes, downloaded data, labels, model weights, and generated output outside
 
 Before committing, inspect the staged file list and diff. Do not force-add ignored notes or local data without explicit user instructions. Keep personal contact details and credentials out of shared configuration.
 
+Commit and push completed work at small, tested milestones instead of accumulating changes across stages.
+Treat routine commits and pushes within the authorized scope as approved unless the user asks to keep work local.
+Run the relevant checks and inspect the staged diff before each commit.
+Push completed commits to the current branch's configured remote without asking for repeated confirmation.
+Keep stage approvals separate from Git publication, and preserve the rules for ignored and private files.
+Do not force-push or rewrite shared history without explicit authorization.
+
 Before automated SEC retrieval, establish the client identity and follow current SEC access guidance. Cache retrieved documents and record failures. Do not invent contact information.
 
 ## Validate changes and report limits

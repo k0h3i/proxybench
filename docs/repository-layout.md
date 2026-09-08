@@ -17,7 +17,7 @@ The package follows the reviewed extraction architecture. Add behavior to the pa
 | `proxybench.extraction` | Record segmentation, extraction adapters, and mechanical validation |
 | `proxybench.annotation` | Review packets, source-first labeling, and annotation history |
 | `proxybench.evaluation` | Common normalization, scoring, comparison protocols, and error reports |
-| `proxybench.execution` | Development schedules, subprocess limits, capture, replay, and execution reports |
+| `proxybench.execution` | Development schedules, isolated comparison execution, subprocess limits, capture, replay, and execution reports |
 | `proxybench.training` | Later supervision generation, data preparation, and fine-tuning |
 
 Categorization and proposal linking remain later stages. Their code will be added after their review gates. They cannot overwrite extracted source facts.
