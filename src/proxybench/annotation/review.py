@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import html
 import json
 from pathlib import Path
 import re
@@ -178,7 +179,64 @@ def load_suggestions(path, packets):
     return drafts
 
 
-def write_review(root, *, draft_path=None, packet_directory="data/packets/calibration"):
+def training_template(contract, count):
+    """Use readable controls while preserving structured labels in saved drafts."""
+    from proxybench.annotation.training_editor import SCRIPT
+    from proxybench.training.labels import TYPES
+
+    def descriptor(kind):
+        if kind is str:
+            return {'type': 'text'}
+        if isinstance(kind, tuple):
+            return {'type': 'text', 'choices': kind}
+        if isinstance(kind, dict):
+            return {'type': 'object', 'fields': {key: descriptor(value) for key, value in kind.items()}}
+        return {'type': 'list', 'item': descriptor(kind[0])}
+    template = TEMPLATE.replace('First calibration review', 'Training label review')
+    template = template.replace('Six source packets are ready.', f'{count} source packets are ready.')
+    template = template.replace('All six examples remain development data. Review this first set before any further pilot packets.',
+                                'These examples remain development data. Download your corrections for explicit acceptance before training export.')
+    start = template.index('<details><summary>Guide and field meanings</summary>')
+    end = template.index('</details>', start) + len('</details>')
+    guide = ('<details><summary>Label contract and editing guide</summary>'
+             '<p>Edit the answer text directly. Fund details, identifiers, and vote components have separate labeled controls. '
+             'Select No value for missing information. An empty text box with No value cleared means empty text.</p>'
+             '<p>Origin is EXTRACTED or DERIVED for present fields. Leave it blank for unresolved fields. '
+             'The contract defines the explicit nonvoting exception.</p>'
+             '<p>Supporting quotations are review notes. No source coordinates are required. '
+             'Review completion does not itself accept a label for training.</p>'
+             '<details><summary>Full label contract</summary><pre style="white-space:pre-wrap">' + html.escape(contract) + '</pre></details></details>')
+    template = template[:start] + guide + template[end:]
+    template = template.replace("const origins=['','EXTRACTED','DERIVED','INFERRED'];", "const origins=['','EXTRACTED','DERIVED'];")
+    template = template.replace("set_id:'calibration-first-v1',schema:'calibration-draft-v2'", "set_id:'direct-sol-labels-v1',schema:'training-review-v1'")
+    template = template.replace('proxybench-calibration-bound-v2:', 'proxybench-training-review-v1:')
+    template = template.replace('Evidence: block and quotation', 'Supporting quotation or note')
+    template = template.replace('Label only the yellow target. Adjacent rows supply context. One target can continue across two rows.',
+                                'Review the highlighted proposal and its disclosed vote. The reporting fund appears alongside it.')
+    template = template.replace('Original source passages with one marked target', 'Readable original filing passage')
+    template = template.replace('iframe{width:100%;height:650px;', 'iframe{width:100%;height:820px;')
+    template = template.replace("'proxybench-calibration-'", "'proxybench-training-review-'")
+    marker = "$('reviewed').onchange=()=>{const a=state.packets[packets[current].manifest.packet_id];"
+    guard = """
+ if($('reviewed').checked){try{for(const f of fieldNames){const v=a.fields[f];
+ JSON.parse(v.value);const raw=JSON.parse(v.raw_text);if(raw!==null&&typeof raw!=='string')throw Error(f+': original wording must be a JSON string or null.');
+ }}catch(error){$('reviewed').checked=false;message('Fix the JSON before completing review: '+error.message);return;}}
+"""
+    template = template.replace(marker, marker + guard)
+    template = template.replace("control=document.createElement(options?'select':'textarea')",
+                                "control=(prop==='value'||prop==='raw_text')?trainingControl(f,prop):document.createElement(options?'select':'textarea')")
+    template = template.replace("(draft[prop]||'(blank)')", "trainingDisplay(draft[prop],prop)")
+    template = template.replace("'Source wording: '+draft.raw_text", "'Source wording: '+trainingDisplay(draft.raw_text,'raw_text')")
+    schema = json.dumps({key: descriptor(kind) for key, kind in TYPES.items()})
+    template = template.replace("'use strict';", "'use strict';\nconst trainingSchema=" + schema + ";\n" + SCRIPT)
+    template = template.replace('</style>', '.training-group{border:1px solid #c9d3da;border-radius:5px;padding:8px;margin:8px 0}'
+                                '.training-group legend{font-weight:600}.training-value label{font-size:13px}'
+                                '.training-item{border-bottom:2px solid #c9d3da;padding-bottom:10px;margin-bottom:12px}'
+                                'table.fields{min-width:1100px}.fields td:nth-child(2){min-width:310px}</style>')
+    return template
+
+
+def write_review(root, *, draft_path=None, packet_directory="data/packets/calibration", training_contract=None):
     root = Path(root)
     directory = root / packet_directory
     packets = json.loads((directory / 'packet-set.json').read_text(encoding='utf-8'))
@@ -190,7 +248,8 @@ def write_review(root, *, draft_path=None, packet_directory="data/packets/calibr
     drafts = load_suggestions(draft_path, packets) if draft_path else {'packets': {}}
     draft_payload = json.dumps(drafts, ensure_ascii=False).replace('<', '\\u003c')
     substitutions = {'__PACKETS__': payload, '__FIELDS__': json.dumps(FIELDS), '__DRAFTS__': draft_payload}
-    page = re.sub(r'__PACKETS__|__FIELDS__|__DRAFTS__', lambda match: substitutions[match.group()], TEMPLATE)
+    template = training_template(training_contract, len(packets)) if training_contract is not None else TEMPLATE
+    page = re.sub(r'__PACKETS__|__FIELDS__|__DRAFTS__', lambda match: substitutions[match.group()], template)
     with (directory / 'index.html').open('x', encoding='utf-8') as stream:
         stream.write(page)
     return directory / 'index.html'

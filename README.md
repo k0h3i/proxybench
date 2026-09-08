@@ -6,7 +6,7 @@ The user edits those drafts in the existing browser review interface.
 Only explicitly accepted labels can become fine-tuning examples.
 
 The package includes local source readers, editable review pages, record validation, scoring, and local model utilities.
-The lean training-label adapter and approved-label exporter remain implementation work.
+The [training-label guide](docs/training-labels.md) explains draft review and export of explicitly accepted labels.
 Read the [local review guide](docs/local-review.md) and [repository guide](docs/repository-layout.md).
 When local notes exist, start with `notes/README.md` for the current plan and label contract.
 
