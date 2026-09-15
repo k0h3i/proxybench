@@ -8,6 +8,7 @@ Only explicitly accepted labels can become fine-tuning examples.
 The package includes local source readers, editable review pages, record validation, scoring, and local model utilities.
 The [training-label guide](docs/training-labels.md) explains draft review and export of explicitly accepted labels.
 Read the [local review guide](docs/local-review.md) and [repository guide](docs/repository-layout.md).
+The [Qwen3.5-4B guide](docs/qwen35-4b-smoke.md) describes the bounded local training test.
 When local notes exist, start with `notes/README.md` for the current plan and label contract.
 
 ## Setup and tests
