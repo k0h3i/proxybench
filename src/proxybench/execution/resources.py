@@ -41,7 +41,7 @@ def process_memory(pid):
 
 def limit_reason(samples_below, available, phase_elapsed, total_elapsed, limits):
     below = samples_below + 1 if available < limits['stop_host_bytes'] else 0
-    if below >= 2:
+    if below >= limits.get('stop_host_samples', 2):
         return below, 'HOST_MEMORY_LIMIT'
     if phase_elapsed >= limits['phase_seconds']:
         return below, 'PHASE_TIMEOUT'
@@ -79,8 +79,11 @@ def supervise(command, output, limits, *, ledger):
             used += entry['elapsed_seconds']
     initial = host_memory()
     device = device_memory()
-    if initial['available_bytes'] < limits['start_host_bytes'] or used >= limits['total_seconds']:
-        write_json(output / 'result.json', {'status': 'PREFLIGHT_REFUSED', 'host': initial, 'used_seconds': used})
+    if (initial['available_bytes'] < limits['start_host_bytes']
+            or device['free_bytes'] < limits['device_margin_bytes']
+            or used >= limits['total_seconds']):
+        write_json(output / 'result.json', {'status': 'PREFLIGHT_REFUSED', 'host': initial,
+                                           'device': device, 'used_seconds': used})
         return 'PREFLIGHT_REFUSED'
     write_json(output / 'configuration.json', {'command': command, 'limits': limits, 'prior_seconds': used,
                                                'initial_host': initial, 'initial_device': device})
@@ -112,6 +115,8 @@ def supervise(command, output, limits, *, ledger):
                 log.flush()
                 below, reason = limit_reason(below, host['available_bytes'], tick - phase_started,
                                               used + tick - start, limits)
+                if gpu['free_bytes'] < limits['device_margin_bytes']:
+                    reason = 'DEVICE_MEMORY_LIMIT'
                 if reason:
                     status = reason
                     stop_group(process)
@@ -120,7 +125,7 @@ def supervise(command, output, limits, *, ledger):
                 if code is not None:
                     status = 'EXITED' if code == 0 else 'PROCESS_FAILED'
                     break
-                time.sleep(max(0, 1 - (time.monotonic() - tick)))
+                time.sleep(max(0, limits.get('sample_seconds', 1) - (time.monotonic() - tick)))
     finally:
         if process is not None:
             stop_group(process)
