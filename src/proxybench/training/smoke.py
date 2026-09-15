@@ -276,7 +276,7 @@ def worker(args):
     from transformers import AutoTokenizer
     original_tokenizer = AutoTokenizer.from_pretrained(str(args.model), local_files_only=True)
     items, bounds = prepare(original_tokenizer, rows, config)
-    if args.phase in ('train-save', 'reload-panel', 'diagnostics', 'merged', 'final-reference', 'final-candidate'):
+    if args.phase in ('train-save', 'reload-panel', 'diagnostics', 'merged', 'export-merge', 'final-reference', 'final-candidate'):
         if bounds['context_tokens'] != 5120 or bounds['generation_tokens'] != 1792:
             raise ValueError('Fresh token bounds differ from the optimization plan')
     save(args.output / 'prepared.json', {'items': items, 'bounds': bounds, 'examples': manifest['examples']})
@@ -443,7 +443,7 @@ def worker(args):
     torch.testing.assert_close(fused_grad, ordinary_grad, atol=0.01, rtol=0.05)
     save(args.output / 'loss-fixture.json', {'fused':fused.item(), 'ordinary':ordinary.item(), 'single_shift_and_mask_pass':True})
     del hidden, weight, labels, fused, ordinary, logits, fused_grad, ordinary_grad
-    if args.phase in ('train-save', 'reload-panel', 'diagnostics', 'merged', 'final-reference', 'final-candidate'):
+    if args.phase in ('train-save', 'reload-panel', 'diagnostics', 'merged', 'export-merge', 'final-reference', 'final-candidate'):
         from proxybench.training.optimization import run_phase
         return run_phase(args, config=config, rows=rows, manifest=manifest, provenance=provenance,
                          items=items, bounds=bounds, model=model, tokenizer=tokenizer,
@@ -509,7 +509,7 @@ def worker(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('phase', choices=['pilot', 'main', 'reload', 'train-save', 'reload-panel',
-                                        'diagnostics', 'merged', 'final-reference', 'final-candidate'])
+                                        'diagnostics', 'merged', 'export-merge', 'final-reference', 'final-candidate'])
     parser.add_argument('--configuration', type=Path, required=True)
     parser.add_argument('--data', type=Path, required=True)
     parser.add_argument('--model', type=Path, required=True)

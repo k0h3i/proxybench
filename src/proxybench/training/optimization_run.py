@@ -14,7 +14,7 @@ from proxybench.training.smoke import accepted_rows, digest
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('phase', choices=['cpu-check', 'train-save', 'reload-panel', 'diagnostics',
-                                        'merged', 'final-reference', 'final-candidate'])
+                                        'merged', 'export-merge', 'final-reference', 'final-candidate'])
     parser.add_argument('--run', type=Path, required=True)
     parser.add_argument('--estimate-seconds', type=float, required=True)
     parser.add_argument('--reserve-seconds', type=float, default=0)

@@ -199,6 +199,14 @@ def run_phase(args, *, config, rows, manifest, provenance, items, bounds, model,
         warm(1, 'observer')
         request(1, 'observer-stream', maximum=256, forced=True)
         request(1, 'observer-return', maximum=256, forced=True, streaming=False)
+    elif args.phase == 'export-merge':
+        from proxybench.training.merged_export import publish_merged
+        expected = read_json((args.output.parent / 'merged/merge.json').read_bytes())['after']
+        model = merge_model(model, generation_input(items[14]), args.output)
+        actual = read_json((args.output / 'merge.json').read_bytes())['after']
+        if actual != expected:
+            raise ValueError('Recreated merge differs from the measured merge')
+        publish_merged(model, tokenizer, args.output / 'model', expected)
     elif args.phase in ('merged', 'final-candidate'):
         model = merge_model(model, generation_input(items[14]), args.output)
         model.eval()
