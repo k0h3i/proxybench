@@ -93,12 +93,20 @@ def host_memory():
 
 
 def device_memory():
-    result = subprocess.run(['nvidia-smi', '--query-gpu=memory.total,memory.used,memory.free',
+    result = subprocess.run(['nvidia-smi', '--query-gpu=memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu,power.draw,clocks.sm',
                              '--format=csv,noheader,nounits', '--id=0'], capture_output=True, text=True, timeout=5)
     if result.returncode:
         raise RuntimeError('Device memory query failed: ' + result.stderr.strip())
-    total, used, free = [int(s.strip()) * 1024 * 1024 for s in result.stdout.strip().split(',')]
-    return {'total_bytes': total, 'used_bytes': used, 'free_bytes': free}
+    fields = [s.strip() for s in result.stdout.strip().split(',')]
+    total, used, free = [int(s) * 1024 * 1024 for s in fields[:3]]
+    activity = {}
+    for name, value in zip(('gpu_utilization_percent', 'memory_utilization_percent', 'temperature_c',
+                            'power_watts', 'sm_clock_mhz'), fields[3:], strict=True):
+        try:
+            activity[name] = float(value)
+        except ValueError:
+            activity[name] = None
+    return {'total_bytes': total, 'used_bytes': used, 'free_bytes': free, **activity}
 
 
 def process_memory(pid):

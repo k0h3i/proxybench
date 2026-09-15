@@ -6,10 +6,19 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from proxybench.execution.resources import limit_reason, supervise
+from proxybench.execution.resources import device_memory, limit_reason, supervise
 
 
 class DeviceLimitTests(unittest.TestCase):
+    def test_activity_fields_preserve_memory_and_unknown_readings(self):
+        from types import SimpleNamespace
+        result = SimpleNamespace(returncode=0, stdout='24576, 1024, 23552, 35, 24, 61, 105.17, [N/A]', stderr='')
+        with patch('proxybench.execution.resources.subprocess.run', return_value=result):
+            sample = device_memory()
+        self.assertEqual(sample['free_bytes'], 23552 * 1024**2)
+        self.assertEqual(sample['gpu_utilization_percent'], 35)
+        self.assertIsNone(sample['sm_clock_mhz'])
+
     def test_configured_host_limit_stops_on_first_sample(self):
         limits = dict(stop_host_bytes=10, stop_host_samples=1, phase_seconds=30, total_seconds=60)
         self.assertEqual(limit_reason(0, 9, 1, 1, limits), (1, 'HOST_MEMORY_LIMIT'))

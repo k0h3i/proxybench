@@ -6,9 +6,11 @@ import uuid
 from proxybench.execution.resources import durable_json
 
 
-def validate_checkpoint(directory, expected=None):
+def validate_checkpoint(directory, expected=None, *, allow_temporary=False):
     from proxybench.training.smoke import digest, read_json
     directory = Path(directory)
+    if '.incomplete-' in directory.name and not allow_temporary:
+        raise ValueError('Checkpoint publication is incomplete')
     complete = read_json((directory / 'complete.json').read_bytes())
     if complete.get('status') != 'COMPLETE':
         raise ValueError('Checkpoint is incomplete')
@@ -54,7 +56,7 @@ def publish_adapter(model, tokenizer, directory, identity=None):
             with path.open('rb') as stream:
                 os.fsync(stream.fileno())
     durable_json(temporary / 'complete.json', dict(status='COMPLETE', manifest_sha256=digest(temporary / 'manifest.json')))
-    validate_checkpoint(temporary, identity or {})
+    validate_checkpoint(temporary, identity or {}, allow_temporary=True)
     if directory.exists():
         raise FileExistsError(directory)
     temporary.rename(directory)

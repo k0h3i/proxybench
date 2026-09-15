@@ -108,7 +108,7 @@ time.sleep(60)
                     publish_adapter(model, Tokenizer(), root / 'failed')
             self.assertFalse((root / 'failed').exists())
             incomplete = next(root.glob('failed.incomplete-*'))
-            with self.assertRaises(FileNotFoundError):
+            with self.assertRaisesRegex(ValueError, 'publication is incomplete'):
                 validate_checkpoint(incomplete)
             publish_adapter(model, Tokenizer(), root / 'good', {'model': 'tiny'})
             validate_checkpoint(root / 'good', {'model': 'tiny'})
@@ -117,6 +117,13 @@ time.sleep(60)
             (root / 'good/adapter_config.json').write_text('corrupted')
             with self.assertRaisesRegex(ValueError, 'hash'):
                 validate_checkpoint(root / 'good')
+            with patch.object(Path, 'rename', side_effect=OSError('publication failed')):
+                with self.assertRaisesRegex(OSError, 'publication failed'):
+                    publish_adapter(model, Tokenizer(), root / 'unpublished')
+            unpublished = next(root.glob('unpublished.incomplete-*'))
+            self.assertTrue((unpublished / 'complete.json').exists())
+            with self.assertRaisesRegex(ValueError, 'publication is incomplete'):
+                validate_checkpoint(unpublished)
 
     def test_sampled_merge_preserves_unadapted_tensors(self):
         try:

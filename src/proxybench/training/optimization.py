@@ -144,6 +144,8 @@ def run_phase(args, *, config, rows, manifest, provenance, items, bounds, model,
                 operations[name + '.' + attribute] = dict(module=getattr(function, '__module__', None),
                                                          name=getattr(function, '__qualname__', str(function)))
     durable_json(args.output / 'runtime.json', dict(operations=operations, use_cache=True,
+        cache_implementation=getattr(model.generation_config, 'cache_implementation', None),
+        persistent_model_cache=hasattr(model.get_base_model(), '_cache'),
         devices=sorted({str(p.device) for p in model.parameters()}),
         dtypes=sorted({str(p.dtype) for p in model.parameters()}), memory=memory()))
 
