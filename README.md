@@ -11,6 +11,12 @@ Read the [local review guide](docs/local-review.md) and [repository guide](docs/
 The [Qwen3.5-4B guide](docs/qwen35-4b-smoke.md) describes the bounded local training test.
 When local notes exist, start with `notes/README.md` for the current plan and label contract.
 
+## Faster local inference
+
+On 15 development examples, the merged llama.cpp model reduced median answer time from 137.72 to 18.92 seconds.
+Both methods used the same RTX 3090 GPU, and existing extraction errors remained.
+The [inference guide](docs/qwen35-4b-inference.md) explains the change with a before-and-after diagram, measured results, and limitations.
+
 ## Setup and tests
 
 The package requires Python 3.11 or later and declares no runtime dependencies.
