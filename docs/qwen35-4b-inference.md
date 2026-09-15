@@ -62,6 +62,16 @@ BF16 and F32 store numbers with 16 and 32 bits.
 All 426 converted arrays matched the converter's expected transformations.
 The successful engine test used this export without further training.
 
+## How this fits the usual workflow
+
+LoRA trains adapters while keeping base weights fixed.
+[Hugging Face's LoRA guide](https://huggingface.co/docs/peft/v0.21.0/package_reference/lora) documents merging as a way to remove the extra adapter calculations during inference.
+[Unsloth's export guide](https://unsloth.ai/docs/basics/inference-and-deployment/saving-to-gguf) documents saving a merged model for use with llama.cpp.
+
+These are established deployment options, and neither merging nor llama.cpp is required for every fine-tuned model.
+In our project, we resolved converter and library compatibility issues, preserved the trained model, and compared complete answers on the same inputs.
+The 15-case comparison found no new reviewed errors from the engine, while existing extraction errors remained.
+
 ## Where CUDA fits
 
 CUDA is NVIDIA's software platform for GPU computation.
