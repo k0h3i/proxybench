@@ -8,8 +8,78 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 
 from proxybench.execution.runner import write_json
+
+
+def durable_json(path, value):
+    path = Path(path)
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    with temporary.open('w') as stream:
+        json.dump(value, stream, allow_nan=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def ledger_entries(ledger):
+    entries = [json.loads(line) for line in Path(ledger).read_text().splitlines()] if Path(ledger).exists() else []
+    if any(entry['status'] == 'STARTED' for entry in entries):
+        raise ValueError('Unclosed execution ledger entry requires operator reconciliation')
+    ids = [entry['execution_id'] for entry in entries if 'execution_id' in entry]
+    if len(set(ids)) != len(ids):
+        raise ValueError('Duplicate execution ledger entry')
+    return entries
+
+
+def append_entry(ledger, entry):
+    with Path(ledger).open('a') as stream:
+        stream.write(json.dumps(entry) + '\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def group_members(pgid):
+    members = []
+    for path in Path('/proc').iterdir():
+        if not path.name.isdigit():
+            continue
+        try:
+            fields = (path / 'stat').read_text().rsplit(')', 1)[1].split()
+            if int(fields[2]) == pgid and fields[0] != 'Z':
+                members.append(int(path.name))
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+    return members
+
+
+def reconcile(ledger):
+    """Charge an abandoned execution once, after its recorded processes exit."""
+    ledger = Path(ledger)
+    active = ledger.with_suffix('.active.json')
+    record = json.loads(active.read_text())
+    entries = ledger_entries(ledger)
+    same_boot = record['boot_id'] == Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    if same_boot and Path(f"/proc/{record['supervisor_pid']}").exists():
+        raise ValueError('Recorded supervisor still exists; reconcile its ownership first')
+    owner = Path(record['run']) / 'owner.json'
+    if same_boot and owner.exists() and group_members(json.loads(owner.read_text())['pid']):
+        raise ValueError('Owned process group survives; stop the recorded group before reconciliation')
+    if not any(entry.get('execution_id') == record['execution_id'] for entry in entries):
+        elapsed = time.monotonic() - record['started_monotonic'] if same_boot else time.time() - record['started_wall']
+        if elapsed < 0:
+            raise ValueError('Clock mismatch requires manual elapsed-time reconciliation')
+        append_entry(ledger, dict(status='RECONCILED', execution_id=record['execution_id'],
+                                 elapsed_seconds=elapsed, run=record['run']))
+    active.unlink()
+    ledger.with_suffix('.lock').unlink(missing_ok=True)
+    return sum(entry['elapsed_seconds'] for entry in ledger_entries(ledger))
 
 
 def host_memory():
@@ -69,18 +139,16 @@ def stop_group(process):
 
 def supervise(command, output, limits, *, ledger):
     output, ledger = Path(output), Path(ledger)
+    active = ledger.with_suffix('.active.json')
+    if active.exists() or ledger.with_suffix('.lock').exists():
+        raise ValueError('Active execution requires process and elapsed-time reconciliation')
     output.mkdir(parents=True, exist_ok=False)
-    used = 0
-    if ledger.exists():
-        for line in ledger.read_text().splitlines():
-            entry = json.loads(line)
-            if entry['status'] == 'STARTED':
-                raise ValueError('Unclosed execution ledger entry requires operator reconciliation')
-            used += entry['elapsed_seconds']
+    used = sum(entry['elapsed_seconds'] for entry in ledger_entries(ledger))
+    cpu = limits.get('cpu_only', False)
     initial = host_memory()
-    device = device_memory()
+    device = device_memory() if not cpu else {'free_bytes': 0}
     if (initial['available_bytes'] < limits['start_host_bytes']
-            or device['free_bytes'] < limits['device_margin_bytes']
+            or (not cpu and device['free_bytes'] < limits['device_margin_bytes'])
             or used >= limits['total_seconds']):
         write_json(output / 'result.json', {'status': 'PREFLIGHT_REFUSED', 'host': initial,
                                            'device': device, 'used_seconds': used})
@@ -93,14 +161,24 @@ def supervise(command, output, limits, *, ledger):
     with lock.open('x') as stream:
         stream.write(str(os.getpid()))
     start = time.monotonic()
+    execution_id = uuid.uuid4().hex
+    record = dict(status='STARTED', execution_id=execution_id, run=str(output.resolve()),
+                  supervisor_pid=os.getpid(), started_monotonic=start, started_wall=time.time(),
+                  boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+    durable_json(active, record)
     process = None
     status = 'SUPERVISOR_FAILED'
     phase, phase_started, below = 'loading', start, 0
     minimum_free = device['free_bytes']
     try:
         with (output / 'stdout.log').open('xb') as stdout, (output / 'stderr.log').open('xb') as stderr, (output / 'memory.jsonl').open('x') as log:
-            env = dict(os.environ, PROXYBENCH_PHASE_FILE=str((output / 'phase.json').resolve()))
-            process = subprocess.Popen(command, stdout=stdout, stderr=stderr, start_new_session=True, env=env)
+            env = dict(os.environ, PROXYBENCH_PHASE_FILE=str((output / 'phase.json').resolve()),
+                       PROXYBENCH_REQUEST_FILE=str((output / 'request.json').resolve()))
+            owner, gate = output / 'owner.json', output / 'launch.json'
+            wrapper = [sys.executable, '-m', 'proxybench.execution.owned', str(owner), str(gate), *command]
+            process = subprocess.Popen(wrapper, stdout=stdout, stderr=stderr, start_new_session=True, env=env)
+            durable_json(active, {**record, 'worker_pid': process.pid})
+            durable_json(gate, {'execution_id': execution_id})
             while True:
                 tick = time.monotonic()
                 phase_file = output / 'phase.json'
@@ -108,15 +186,23 @@ def supervise(command, output, limits, *, ledger):
                     current = json.loads(phase_file.read_text())['phase']
                     if current != phase:
                         phase, phase_started = current, tick
-                host, gpu = host_memory(), device_memory()
+                host, gpu = host_memory(), device_memory() if not cpu else {'free_bytes': 0}
                 minimum_free = min(minimum_free, gpu['free_bytes'])
                 log.write(json.dumps({'elapsed_seconds': tick - start, 'phase': phase, 'host': host,
                                       'device': gpu, 'process': process_memory(process.pid)}) + '\n')
                 log.flush()
-                below, reason = limit_reason(below, host['available_bytes'], tick - phase_started,
+                below, reason = limit_reason(below, host['available_bytes'], tick - (start if limits.get('fixed_phase') else phase_started),
                                               used + tick - start, limits)
-                if gpu['free_bytes'] < limits['device_margin_bytes']:
+                if not cpu and gpu['free_bytes'] < limits['device_margin_bytes']:
                     reason = 'DEVICE_MEMORY_LIMIT'
+                request_file = output / 'request.json'
+                if request_file.exists():
+                    try:
+                        request = json.loads(request_file.read_text())
+                        if tick >= request['deadline_monotonic']:
+                            reason = 'REQUEST_TIMEOUT'
+                    except FileNotFoundError:
+                        pass
                 if reason:
                     status = reason
                     stop_group(process)
@@ -127,17 +213,40 @@ def supervise(command, output, limits, *, ledger):
                     break
                 time.sleep(max(0, limits.get('sample_seconds', 1) - (time.monotonic() - tick)))
     finally:
+        cleanup_start = time.monotonic()
         if process is not None:
             stop_group(process)
+        survivors = group_members(process.pid) if process else []
+        if survivors:
+            status = 'OWNERSHIP_UNRESOLVED'
+        pending = output / 'request.json'
+        if pending.exists():
+            request_path = Path(json.loads(pending.read_text())['request_path'])
+            request = json.loads(request_path.read_text())
+            if request.get('status') == 'STARTED':
+                events = []
+                token_path = request_path.with_suffix('.tokens.jsonl')
+                if token_path.exists():
+                    for line in token_path.read_text().splitlines():
+                        try:
+                            events.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            break
+                durable_json(request_path, {**request, 'status': 'INTERRUPTED', 'supervisor_status': status,
+                             'token_ids': [event['token_id'] for event in events],
+                             'format_valid': False, 'terminal_stream_event': False})
         elapsed = time.monotonic() - start
-        entry = {'status': status, 'elapsed_seconds': elapsed, 'run': str(output)}
-        with ledger.open('a') as stream:
-            stream.write(json.dumps(entry) + '\n')
-        lock.unlink()
+        entry = {'status': status, 'execution_id': execution_id, 'elapsed_seconds': elapsed, 'run': str(output)}
+        append_entry(ledger, entry)
+        if not survivors:
+            active.unlink()
+            lock.unlink()
         write_json(output / 'result.json', {**entry, 'total_used_seconds': used + elapsed,
                                            'returncode': process.returncode if process else None,
+                                           'cleanup_seconds': time.monotonic() - cleanup_start,
+                                           'surviving_owned_pids': survivors,
                                            'minimum_device_free_bytes': minimum_free,
-                                           'memory_margin_pass': minimum_free >= limits['device_margin_bytes']})
+                                           'memory_margin_pass': cpu or minimum_free >= limits['device_margin_bytes']})
     return status
 
 

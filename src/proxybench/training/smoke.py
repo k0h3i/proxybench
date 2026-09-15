@@ -174,16 +174,8 @@ def require_same_adapter(expected, actual):
 
 
 def save_adapter(model, tokenizer, directory):
-    from peft import get_peft_model_state_dict
-    from safetensors.torch import load_file
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=False)
-    model.save_pretrained(str(directory), safe_serialization=True, save_embedding_layers=False)
-    tokenizer.save_pretrained(str(directory))
-    saved = load_file(str(directory / 'adapter_model.safetensors'))
-    if not saved or any('lora_' not in name for name in saved):
-        raise ValueError('Saved state contains unintended parameters')
-    require_same_adapter(saved, get_peft_model_state_dict(model, save_embedding_layers=False))
+    from proxybench.training.checkpoints import publish_adapter
+    return publish_adapter(model, tokenizer, directory)
 
 
 class GenerationRecorder:
@@ -284,6 +276,9 @@ def worker(args):
     from transformers import AutoTokenizer
     original_tokenizer = AutoTokenizer.from_pretrained(str(args.model), local_files_only=True)
     items, bounds = prepare(original_tokenizer, rows, config)
+    if args.phase in ('train-save', 'reload-panel', 'diagnostics', 'merged', 'final-reference', 'final-candidate'):
+        if bounds['context_tokens'] != 5120 or bounds['generation_tokens'] != 1792:
+            raise ValueError('Fresh token bounds differ from the optimization plan')
     save(args.output / 'prepared.json', {'items': items, 'bounds': bounds, 'examples': manifest['examples']})
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(args.model.resolve()), max_seq_length=bounds['context_tokens'],
@@ -448,6 +443,11 @@ def worker(args):
     torch.testing.assert_close(fused_grad, ordinary_grad, atol=0.01, rtol=0.05)
     save(args.output / 'loss-fixture.json', {'fused':fused.item(), 'ordinary':ordinary.item(), 'single_shift_and_mask_pass':True})
     del hidden, weight, labels, fused, ordinary, logits, fused_grad, ordinary_grad
+    if args.phase in ('train-save', 'reload-panel', 'diagnostics', 'merged', 'final-reference', 'final-candidate'):
+        from proxybench.training.optimization import run_phase
+        return run_phase(args, config=config, rows=rows, manifest=manifest, provenance=provenance,
+                         items=items, bounds=bounds, model=model, tokenizer=tokenizer,
+                         train=train, memory=memory, phase=phase, inference_mode=inference_mode)
     if args.phase == 'pilot':
         phase('pilot_training')
         longest = max(range(len(items)), key=lambda i: items[i]['combined_tokens'])
@@ -508,13 +508,15 @@ def worker(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('phase', choices=['pilot', 'main', 'reload'])
+    parser.add_argument('phase', choices=['pilot', 'main', 'reload', 'train-save', 'reload-panel',
+                                        'diagnostics', 'merged', 'final-reference', 'final-candidate'])
     parser.add_argument('--configuration', type=Path, required=True)
     parser.add_argument('--data', type=Path, required=True)
     parser.add_argument('--model', type=Path, required=True)
     parser.add_argument('--provenance', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--adapter', type=Path)
+    parser.add_argument('--reference', type=Path)
     args = parser.parse_args()
     if args.phase == 'reload' and args.adapter is None:
         parser.error('Reload requires --adapter')
