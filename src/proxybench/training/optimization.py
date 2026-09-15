@@ -6,7 +6,7 @@ from pathlib import Path
 from proxybench.execution.resources import durable_json, host_memory
 from proxybench.extraction.measured_generation import generate
 from proxybench.training.checkpoints import publish_adapter, validate_checkpoint
-from proxybench.training.smoke import digest, generation_input, read_json, require_same_adapter
+from proxybench.training.smoke import digest, generation_input, prepare, read_json, require_same_adapter
 
 PANEL = (1, 6, 2, 7, 12, 14)
 RELOAD = PANEL[:3]
@@ -42,6 +42,12 @@ def merge_model(model, prompt, output):
         raise ValueError('Installed merge API lacks safe_merge')
     base = model.get_base_model()
     adapted = {name: module for name, module in base.named_modules() if hasattr(module, 'lora_A')}
+    device_required = 3 * max(module.get_base_layer().weight.numel() * 4 for module in adapted.values()) + 2 * 1024**3
+    device_available = None
+    if next(base.parameters()).is_cuda:
+        device_available = torch.cuda.mem_get_info()[0]
+        if device_available < device_required:
+            raise ValueError('Merge device-memory estimate does not fit')
     before, samples, targets = {}, {}, set()
     for name, module in adapted.items():
         targets.add(name + '.weight')
@@ -88,7 +94,8 @@ def merge_model(model, prompt, output):
     if not torch.isfinite(candidate).all():
         raise ValueError('Nonfinite merged scores')
     durable_json(Path(output) / 'merge.json', dict(api=api, host_required_bytes=required,
-        host_available_bytes=available, samples=samples, before=before, after=after,
+        host_available_bytes=available, device_required_bytes=device_required,
+        device_available_bytes=device_available, samples=samples, before=before, after=after,
         changed=sorted(changed), tied_word_embeddings=merged.config.tie_word_embeddings,
         score_max_absolute_difference=(candidate-reference).abs().max().item(),
         score_mean_absolute_difference=(candidate-reference).abs().mean().item(),
@@ -102,7 +109,7 @@ def run_phase(args, *, config, rows, manifest, provenance, items, bounds, model,
     import torch
     from peft import get_peft_model_state_dict, set_peft_model_state_dict
     from safetensors.torch import load_file
-    from transformers import set_seed
+    from transformers import AutoTokenizer, set_seed
     identity = dict(configuration=config, revision=provenance['revision'], dataset_sha256=config['dataset_sha256'],
                     examples=manifest['examples'], order=bounds['order'], steps=30, pilot_updates_included=False)
     if config.get('panel') != list(PANEL):
@@ -115,6 +122,13 @@ def run_phase(args, *, config, rows, manifest, provenance, items, bounds, model,
         publish_adapter(model, tokenizer, args.output / 'adapter', identity)
     else:
         checkpoint = validate_checkpoint(args.adapter, identity)
+        saved_tokenizer = AutoTokenizer.from_pretrained(str(args.adapter), local_files_only=True)
+        saved_items, saved_bounds = prepare(saved_tokenizer, rows, config)
+        if saved_items != items or saved_bounds != bounds:
+            raise ValueError('Saved tokenizer changes the exact sequences')
+        if (saved_tokenizer.eos_token_id, saved_tokenizer.pad_token_id) != (tokenizer.eos_token_id, tokenizer.pad_token_id):
+            raise ValueError('Saved tokenizer changes special-token behavior')
+        tokenizer = saved_tokenizer
         state = load_file(str(args.adapter / 'adapter_model.safetensors'))
         set_peft_model_state_dict(model, state)
         require_same_adapter(state, get_peft_model_state_dict(model, save_embedding_layers=False))
