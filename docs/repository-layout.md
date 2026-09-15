@@ -22,6 +22,9 @@ Keep original sources and accepted labels under `data/`.
 Keep model output and environments under `artifacts/`.
 The Git ignore rules exclude these contents except their usage guides.
 
-Local notes start at `notes/README.md`.
+Tracked project notes start at `notes/README.md`.
+They include historical review imports and helper scripts.
+Some evidence links point to ignored local data and artifacts, which a fresh clone does not contain.
+Before public release, read [the reminder](../notes/project/before-going-public.md).
 The current plan and label contract live under `notes/training/direct-sol-labeling/`.
 Keep source files available to both the labeling agent and the review browser.

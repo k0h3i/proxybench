@@ -15,7 +15,10 @@ Read the relevant project documents:
 - `notes/training/direct-sol-labeling/plan.md`: Current labeling workflow.
 - `notes/training/direct-sol-labeling/label-contract.md`: Labels supplied to Sol.
 
-The root `notes/` directory is Git-ignored and absent from a fresh clone. Continue work supported by shared documentation when notes are unavailable. Request missing context only when it changes the task or prevents correct work.
+The user authorized tracking `notes/` in the private repository on 2026-09-15.
+Older notes that call this directory ignored describe the earlier policy.
+When the user mentions making the repository public, read [the public-release reminder](notes/project/before-going-public.md) before changing visibility.
+Review tracked notes and Git history with the user before public release.
 
 ## Follow the staged workflow
 
@@ -56,7 +59,10 @@ Retain raw predictions before common normalization. Do not equate a valid citati
 
 Place reusable code under `src/proxybench/`, following the module boundaries in the repository guide. Put behavior tests and small shareable fixtures under `tests/`. Keep shared documentation under `docs/` and portable experiment configuration under `configs/`.
 
-Keep notes, downloaded data, labels, model weights, and generated output outside ordinary commits. Preserve the ignore rules for `notes/`, `data/`, and `artifacts/`. The usage guides in `data/` and `artifacts/` are tracked exceptions.
+Track project notes, including their existing review imports and helper scripts, in this private repository.
+Keep downloaded data, training labels, model weights, and generated run output outside ordinary commits.
+Preserve the ignore rules for `data/` and `artifacts/`.
+Their usage guides are tracked exceptions.
 
 Before committing, inspect the staged file list and diff. Do not force-add ignored notes or local data without explicit user instructions. Keep personal contact details and credentials out of shared configuration.
 

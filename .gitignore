@@ -1,5 +1,5 @@
-# Local planning and review notes.
-/notes/
+# Windows download metadata attached to project notes.
+/notes/**/*:Zone.Identifier
 
 # Local datasets and experiment output. Keep their usage guides.
 /data/*

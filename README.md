@@ -25,5 +25,6 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 Keep original filings, labels, model weights, and generated output outside ordinary commits.
-The root `notes/` directory is ignored by Git.
+The private repository includes [project notes](notes/README.md).
+Before making it public, follow the [public-release reminder](notes/project/before-going-public.md).
 The usage guides in `data/` and `artifacts/` remain tracked exceptions.
