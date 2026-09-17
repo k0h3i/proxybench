@@ -11,8 +11,14 @@ from proxybench.training.historical import check_files, inventory
 from proxybench.training.smoke import digest, read_json
 
 
-def source_text(meta):
-    return '\n'.join(cell['text'] for block in meta['packet']['manifest']['blocks'] for cell in block['cells'])
+def source_text(meta, *, marked=True):
+    blocks = []
+    for block in meta['packet']['manifest']['blocks']:
+        text = '\n'.join(cell['text'] for cell in block['cells'])
+        if marked and block.get('target'):
+            text = 'BEGIN MARKED TARGET\n'+text+'\nEND MARKED TARGET'
+        blocks.append(text)
+    return '\n'.join(blocks)
 
 
 def create_review(directory, cases, *, identity, kind):
@@ -117,7 +123,7 @@ def finish_report(root, state, prepared):
                 invalid.append(key)
             phase = 'baseline' if model == 'original' else 'final'
             answer = read_json((Path(state['completed_phases'][phase]['output'])/f'answer-{index}.json').read_bytes())
-            row[model] = score(reference, answer, source_text(meta),
+            row[model] = score(reference, answer, source_text(meta, marked=False),
                                subject_equivalent=decision['subject_equivalent'], quotation_errors=decision['quotation_errors'])
         cases.append(row)
     report = paired_report(cases)

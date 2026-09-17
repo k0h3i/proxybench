@@ -42,6 +42,10 @@ The runner tests use fixed synthetic responses and bounded local subprocesses.
 They cover date rules, capture integrity, timeouts, and output limits.
 The local-input tests cover XML boundaries, sequence masks, and resource limits.
 
+The historical pilot tests cover exact CPU training resume, source-value scoring, review bindings, and the fixed resource schedule.
+The process tests cover live output, slow terminals, interrupts, and cleanup without GPU work.
+Use the existing isolated environment to include the tensor tests, as shown in the [pilot guide](../docs/qwen35-4b-historical-pilot.md).
+
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -p "test_runner.py" -v
 ```

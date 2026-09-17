@@ -9,6 +9,7 @@ The package includes local source readers, editable review pages, record validat
 The [training-label guide](docs/training-labels.md) explains draft review and export of explicitly accepted labels.
 Read the [local review guide](docs/local-review.md) and [repository guide](docs/repository-layout.md).
 The [Qwen3.5-4B guide](docs/qwen35-4b-smoke.md) describes the bounded local training test.
+The [historical pilot guide](docs/qwen35-4b-historical-pilot.md) gives the CPU-tested commands for the accepted 96/24 dataset and 192-update recipe.
 When local notes exist, start with `notes/README.md` for the current plan and label contract.
 
 ## Faster local inference

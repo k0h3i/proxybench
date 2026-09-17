@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from proxybench.evaluation.pilot_review import accept_decisions, create_review, require_decisions
+from proxybench.evaluation.pilot_review import accept_decisions, create_review, require_decisions, source_text
 from proxybench.evaluation.training_labels import export_comparison, paired_report, score
 from proxybench.training.historical import PHASES, admit_schedule, check_files, panel_indices, prepare_sequences, read_configuration
 from proxybench.training.historical_engine import normalize_engine_length
@@ -193,6 +193,9 @@ class PilotAdmissionTests(unittest.TestCase):
             validate_transition('repair', dict(status='FAILED', failed_phase='training'))
 
     def test_review_bound_to_exact_evidence_before_reveal(self):
+        meta = dict(packet=dict(manifest=dict(blocks=[dict(target=True, cells=[dict(text='Selected nominee')])])) )
+        self.assertIn('BEGIN MARKED TARGET\nSelected nominee\nEND MARKED TARGET', source_text(meta))
+        self.assertEqual(source_text(meta, marked=False), 'Selected nominee')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             a, b = root/'a.json', root/'b.json'
