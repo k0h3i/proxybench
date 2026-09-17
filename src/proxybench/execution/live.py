@@ -112,13 +112,15 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                   supervisor_pid=os.getpid(), started_monotonic=start, started_wall=time.time(),
                   boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
     durable_json(active, dict(record, status='STARTED'))
-    interruptions = 0
+    interruptions, acknowledged = 0, 0
+    requested_at = None
 
     def interrupt(signum, frame):
-        nonlocal interruptions
+        nonlocal interruptions, requested_at
         interruptions += 1
-        display.put('Stop requested. Saving at a safe boundary, at most 30 seconds.\n'
-                    if interruptions == 1 else 'Second interrupt. Stopping the owned processes now.\n')
+        if requested_at is None:
+            requested_at = time.monotonic()
+        # Signal handlers must not acquire the terminal queue's nonreentrant lock.
 
     previous = signal.signal(signal.SIGINT, interrupt)
     previous_term = signal.signal(signal.SIGTERM, interrupt)
@@ -146,6 +148,10 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                     (output / 'memory.jsonl').open('x') as memory:
                 while True:
                     tick = time.monotonic()
+                    if interruptions > acknowledged:
+                        display.put('Stop requested. Saving at a safe boundary, at most 30 seconds.\n'
+                                    if interruptions == 1 else 'Second interrupt. Stopping the owned processes now.\n')
+                        acknowledged = interruptions
                     for reader in (out, err):
                         chunk = reader.read(65536)
                         if chunk:
@@ -185,8 +191,8 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                     if tick-last_sample > 6:
                         reason = 'MEMORY_MONITOR_STALE'
                     if interruptions and stopped_at is None:
-                        stopped_at = tick
-                        durable_json(output / 'stop.json', dict(requested_monotonic=tick))
+                        stopped_at = requested_at
+                        durable_json(output / 'stop.json', dict(requested_monotonic=requested_at))
                         if label not in {'training', 'compilation', 'saving'}:
                             reason = 'USER_STOP'
                     if interruptions > 1:

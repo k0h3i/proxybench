@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import signal
 from pathlib import Path
 import sys
 import tempfile
@@ -11,7 +12,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from proxybench.execution.live import supervise
+from proxybench.execution.live import Console, supervise
 from proxybench.execution.resources import group_members, ledger_entries
 
 
@@ -40,6 +41,21 @@ class LiveSupervisorTests(unittest.TestCase):
         self.assertEqual(result, 'EXITED')
         self.assertIn('step 001/192', saved)
         self.assertIn('step 002/192', stream.getvalue())
+
+    def test_interrupt_during_terminal_queue_write_does_not_reenter_it(self):
+        original, in_write, reentered = Console.put, [], []
+        def put(console, value):
+            if in_write:
+                reentered.append(True)
+            in_write.append(True)
+            if value and value.startswith('[test:'):
+                os.kill(os.getpid(), signal.SIGINT)
+            original(console, value)
+            in_write.pop()
+        with patch.object(Console, 'put', put):
+            result, _, _, _ = self.run_worker('import time; time.sleep(10)')
+        self.assertEqual(result, 'USER_STOP')
+        self.assertEqual(reentered, [])
 
     def test_slow_terminal_does_not_block_time_limit(self):
         release = threading.Event()
