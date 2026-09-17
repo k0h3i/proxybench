@@ -195,7 +195,8 @@ def training_template(contract, count):
     template = TEMPLATE.replace('First calibration review', 'Training label review')
     template = template.replace('Six source packets are ready.', f'{count} source packets are ready.')
     template = template.replace('All six examples remain development data. Review this first set before any further pilot packets.',
-                                'These examples remain development data. Download your corrections for explicit acceptance before training export.')
+                                'Each packet shows its assigned partition. Download your corrections for exact acceptance before dataset export.')
+    template = template.replace("+' · Development data'", "+' · Partition: '+p.manifest.split")
     start = template.index('<details><summary>Guide and field meanings</summary>')
     end = template.index('</details>', start) + len('</details>')
     guide = ('<details><summary>Label contract and editing guide</summary>'
@@ -241,8 +242,11 @@ def write_review(root, *, draft_path=None, packet_directory="data/packets/calibr
     directory = root / packet_directory
     packets = json.loads((directory / 'packet-set.json').read_text(encoding='utf-8'))
     for packet in packets:
-        if packet['manifest'].get('split') != 'development':
-            raise ValueError('This pilot review page supports development packets only. Test review needs its separate source-only procedure.')
+        allowed = {'training', 'development', 'legacy_development'} if training_contract is not None else {'development'}
+        if packet['manifest'].get('split') not in allowed:
+            if training_contract is None:
+                raise ValueError('This pilot review page supports development packets only. Test review needs its separate source-only procedure.')
+            raise ValueError('This training review page excludes test packets. Test review needs its separate source-only procedure.')
         packet['review_binding'] = review_binding(packet)
     payload = json.dumps(packets, ensure_ascii=False).replace('<', '\\u003c')
     drafts = load_suggestions(draft_path, packets) if draft_path else {'packets': {}}
