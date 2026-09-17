@@ -15,7 +15,7 @@ Defer a shared row when the adapter cannot represent its separate subjects.
 
 The source view decodes HTML entities and removes inline tags.
 It preserves empty cells and records `rowspan` and `colspan` attributes.
-The [quotation policy](../notes/training/sol-dataset-expansion/label-policy-v2.md) defines all text operations.
+The [quotation policy](../notes/training/sol-dataset-expansion/label-policy-v3.md) defines all text operations.
 The browser and model use the same cell text.
 The model input also includes the frozen policy.
 
@@ -56,3 +56,16 @@ The coordinator still applies semantic review, family diversity, acquisition lim
 A passed quotation test is not a passed quality gate.
 Modern XML expansion still uses its existing source adapter and needs a later admission step.
 The original 15-row smoke worker and its pinned training recipe remain unchanged.
+
+## Bounded SEC downloads
+
+Run `python -m proxybench.sources.sec` with one URL and output path, or a local JSON selection file.
+Each selection entry supplies `url`, `output`, and an optional `kind` of `index` or `filing`.
+Supply `--state` for the persistent download ledger and `--identity-file` for a private runtime file containing `user_agent`.
+Keep the identity file, downloaded documents, and ledger in ignored local storage.
+
+The client permits official SEC HTTPS addresses and sends at most two requests per second.
+It caps downloads at 60 filings, 4 GiB total, and 100 MiB per document.
+It requires 4 GiB available memory and free disk space for the remaining allowance plus 2 GiB.
+It preserves incomplete responses and stops after an access block or retry instruction.
+Cached files must match their saved hashes before reuse.
