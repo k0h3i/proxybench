@@ -59,6 +59,16 @@ def source_block(raw, start, end, kind, encoding):
             cells.append(dict(text=visible_text(match[3]), **attrs,
                               start_byte=start + len(text[:match.start()].encode(encoding)),
                               end_byte=start + len(text[:match.end()].encode(encoding))))
+    elif kind == 'cell':
+        # Some filings omit the opening row tag around a context heading.
+        match = re.fullmatch(r'\s*<(td|th)\b([^>]*)>(.*?)</\1\s*>\s*', text, re.I | re.S)
+        if not match:
+            raise ValueError('A context cell requires one complete HTML cell')
+        attrs = dict((k.lower(), v.strip('\"\'')) for k, v in re.findall(
+            r'(colspan|rowspan)\s*=\s*(\"[^\"]*\"|\'[^\']*\'|[^\s>]+)', match[2], re.I))
+        if any(not v.isdigit() or int(v) < 1 for v in attrs.values()):
+            raise ValueError('Invalid cell span')
+        cells.append(dict(text=visible_text(match[3]), **attrs, start_byte=start, end_byte=end))
     elif kind == 'block':
         # Callers supply one paragraph or heading, never a table or joined passages.
         if not re.fullmatch(r'\s*<(p|div)\b[^>]*>.*</\1\s*>\s*', text, re.I | re.S):
@@ -102,6 +112,8 @@ def prepare_historical(root, selection, policy):
         raise ValueError('Source ranges overlap or are out of order')
     target = selection['target']
     marked = [i for i, (a, b, _) in enumerate(ranges) if target[0] <= a < b <= target[1]]
+    if any(ranges[i][2] == 'cell' for i in marked):
+        raise ValueError('Standalone cells provide context, not shared-row targets')
     if (not marked or ranges[marked[0]][0] != target[0] or ranges[marked[-1]][1] != target[1]
             or any(ranges[i][1] != ranges[i + 1][0] for i in marked[:-1])):
         raise ValueError('Target must cover complete adjacent blocks. Defer shared-row subtargets.')

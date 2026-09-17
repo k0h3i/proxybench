@@ -10,6 +10,8 @@ The [dataset plan](../notes/training/sol-dataset-expansion/plan.md) defines the 
 Use `proxybench.annotation.historical.prepare_historical` with a reviewed selection and a frozen policy.
 A selection contains ordered byte ranges, their block types, one target range, and its boundary evidence.
 Supported block types are complete HTML rows, single paragraphs or headings, and plain text blocks.
+Standalone HTML cells can supply context when a filing omits their opening row tag.
+They cannot serve as voting targets.
 The adapter rejects nested tables and partial row targets.
 Defer a shared row when the adapter cannot represent its separate subjects.
 

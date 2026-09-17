@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from proxybench.annotation.bindings import review_binding
-from proxybench.annotation.historical import prepare_historical, literal_support, check_packet
+from proxybench.annotation.historical import prepare_historical, literal_support, check_packet, source_block
 from proxybench.annotation.review import write_review
 from proxybench.training.dataset import publish, read_release, check_assignments, draft_gate, length_report
 from proxybench.training.labels import TYPES, to_review, read_json, sha
@@ -81,6 +81,17 @@ class HistoricalTests(unittest.TestCase):
         bad['boundary_review'] = ''
         with self.assertRaises(ValueError):
             prepare_historical(self.root, bad, self.policy)
+
+    def test_orphan_heading_cell_is_context_only(self):
+        raw = b'<td colspan="5">A &amp; B<br>Meeting Date: MAY 09, 2014</td></tr>'
+        end = raw.index(b'</td>') + 5
+        block = source_block(raw, 0, end, 'cell', 'utf-8')
+        self.assertEqual(block['cells'][0]['text'], 'A & B Meeting Date: MAY 09, 2014')
+        self.assertEqual(block['cells'][0]['colspan'], '5')
+        (self.root / 'source.htm').write_bytes(raw)
+        selection = dict(self.selection, source_sha256=sha(raw), spans=[[0, end, 'cell']], target=[0, end])
+        with self.assertRaisesRegex(ValueError, 'context'):
+            prepare_historical(self.root, selection, self.policy)
 
     def test_browser_supports_declared_partitions_and_excludes_test(self):
         (self.root / 'packet-set.json').write_text(json.dumps([self.packet]))
