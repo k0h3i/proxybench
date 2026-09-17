@@ -1,0 +1,219 @@
+"""User-launched GPU phases for the fixed historical pilot."""
+
+import json
+import os
+from pathlib import Path
+import re
+import time
+
+from proxybench.execution.resources import durable_json
+from proxybench.training.checkpoints import publish_adapter, validate_checkpoint
+from proxybench.training.historical import binding, prepare_sequences
+from proxybench.training.optimization import merge_model, tensor_hash
+from proxybench.training.smoke import ResponseCollator, adapter_targets, digest, generation_input, read_json, require_same_adapter
+from proxybench.training.trajectory import publish_state, require_clean_stop, restore_state, train_updates, weighted_loss
+
+
+def phase(name):
+    print(f'Phase: {name}', flush=True)
+    if os.environ.get('PROXYBENCH_PHASE_FILE'):
+        durable_json(os.environ['PROXYBENCH_PHASE_FILE'], dict(phase=name))
+
+
+def stopping():
+    return bool(os.environ.get('PROXYBENCH_STOP_FILE') and Path(os.environ['PROXYBENCH_STOP_FILE']).exists())
+
+
+def gpu_phase(root, name, output, config):
+    # Import order is required by the pinned environment.
+    phase('loading')
+    begin = time.monotonic()
+    from unsloth import FastLanguageModel
+    import torch
+    from peft import get_peft_model_state_dict, set_peft_model_state_dict
+    from safetensors.torch import load_file
+    from transformers import set_seed
+    from unsloth_zoo.loss_utils import fused_linear_cross_entropy
+    from proxybench.extraction.measured_generation import generate
+    from proxybench.training.merged_export import publish_merged
+
+    prepared = read_json((root/'prepared.json').read_bytes())
+    run_state = read_json((root/'state.json').read_bytes())
+    identity = dict(run=run_state['identity'], order=binding(prepared['order']))
+    if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported() or '3090' not in torch.cuda.get_device_name(0):
+        raise ValueError('The pilot requires the local RTX 3090 with BF16 support')
+    set_seed(42)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=str(Path(config['model']).resolve()), max_seq_length=5120, dtype=torch.bfloat16,
+        load_in_4bit=False, load_in_16bit=True, full_finetuning=False, text_only=True,
+        local_files_only=True, use_gradient_checkpointing='unsloth', random_state=42)
+    if prepare_sequences(tokenizer, prepared['rows'], config) != prepared['items']:
+        raise ValueError('Loaded tokenizer changes the frozen sequences')
+    model.config.architectures = [type(model).__name__]
+    if model.config.architectures != ['Qwen3_5ForCausalLM']:
+        raise ValueError('Unexpected text model architecture')
+    pristine = {n: tensor_hash(p) for n, p in model.named_parameters()}
+    if name != 'original-export':
+        targets, unsupported = adapter_targets(model.named_modules(), torch.nn.Linear)
+        if unsupported:
+            raise ValueError('Unsupported adapter projections')
+        model = FastLanguageModel.get_peft_model(
+            model, r=8, target_modules='(?:'+'|'.join(re.escape(n) for n in targets)+')',
+            lora_alpha=16, lora_dropout=0, bias='none', use_gradient_checkpointing='unsloth',
+            random_state=42, max_seq_length=5120, temporary_location=str(output/'temporary-buffers'))
+        trainables = {n: p for n, p in model.named_parameters() if p.requires_grad}
+        if not trainables or any('lora_' not in n for n in trainables):
+            raise ValueError('Unexpected trainable parameters')
+        for target in targets:
+            if not any(target+'.lora_' in n for n in trainables):
+                raise ValueError('Missing adapter projection')
+        for _, module in model.named_modules():
+            if hasattr(module, 'lora_A') and (list(module.lora_A) != ['default'] or module.scaling['default'] != 2):
+                raise ValueError('Unexpected adapter scale or adapter count')
+        durable_json(output/'targets.json', dict(targets=targets, trainables=list(trainables)))
+    base = model.get_base_model() if name != 'original-export' else model
+    backbone, head = base.model, base.get_output_embeddings()
+    collator = ResponseCollator(tokenizer.pad_token_id)
+
+    def memory():
+        torch.cuda.synchronize()
+        free, total = torch.cuda.mem_get_info()
+        if free < config['limits']['device_margin_bytes']:
+            raise ValueError('Free device memory fell below 2 GiB')
+        return dict(allocated_bytes=torch.cuda.memory_allocated(), free_bytes=free, total_bytes=total)
+
+    def mode(training):
+        if training:
+            FastLanguageModel.for_training(model, use_gradient_checkpointing='unsloth')
+            model.train()
+            base.config.use_cache = False
+        else:
+            FastLanguageModel.for_inference(model)
+            model.eval()
+
+    def loss(item):
+        values = {k: v.to('cuda') for k, v in collator([item]).items()}
+        hidden = backbone(input_ids=values['input_ids'], attention_mask=values['attention_mask'],
+                          use_cache=False, return_dict=True).last_hidden_state
+        return fused_linear_cross_entropy(hidden, head.weight, values['labels'])
+
+    def weights():
+        return get_peft_model_state_dict(model, save_embedding_layers=False)
+
+    loading_seconds = time.monotonic()-begin
+    durable_json(output/'loaded.json', dict(seconds=loading_seconds, memory=memory()))
+    if stopping():
+        return
+
+    if name in ('probe', 'training'):
+        mode(True)
+        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                                      lr=1e-4, weight_decay=0)
+        order = prepared['order'] if name == 'training' else [max(range(96), key=lambda i: prepared['items']['training'][i]['combined_tokens'])]*2
+        completed, history, diagnostics = 0, [], {}
+        journal = root/'training-journal.json' if name == 'training' else output/'journal.json'
+        if name == 'training' and journal.exists():
+            previous = read_json(journal.read_bytes())
+            checkpoint = Path(previous['checkpoint'])
+            completed = require_clean_stop(previous, checkpoint, identity)
+            restored = restore_state(model, optimizer, checkpoint, identity=identity, order=order, completed=completed,
+                                     get_weights=weights, set_weights=lambda s: set_peft_model_state_dict(model, s))
+            history, diagnostics = restored['history'], restored['diagnostics']
+            durable_json(output/'restored.json', dict(completed=completed, checkpoint=str(checkpoint), exact_state=True))
+
+        def development_loss(step):
+            if str(step) in diagnostics:
+                return
+            phase('development-loss')
+            model.eval()
+            rows = []
+            for index, item in enumerate(prepared['items']['development']):
+                if stopping():
+                    raise InterruptedError('Stopped during development loss; no clean training checkpoint')
+                with torch.no_grad():
+                    value = loss(item)
+                if not torch.isfinite(value):
+                    raise ValueError('Nonfinite development loss')
+                rows.append(dict(index=index, loss=value.item(), response_tokens=item['response_tokens']))
+            diagnostics[str(step)] = dict(rows=rows, token_weighted_loss=weighted_loss(rows))
+            durable_json(output/f'development-loss-{step}.json', diagnostics[str(step)])
+            print(f'development loss at step {step}: {weighted_loss(rows):.6f}', flush=True)
+            model.train()
+            phase('training')
+
+        if name == 'training' and completed in (0, 96, 192):
+            development_loss(completed)
+
+        def save(step, rows, clean):
+            phase('saving')
+            checkpoints = root/'checkpoints' if name == 'training' else output/'checkpoints'
+            suffix = '-stop-'+output.name if clean else ''
+            path = checkpoints/f'step-{step:03}{suffix}'
+            publish_state(model, optimizer, tokenizer, path, identity=identity, order=order,
+                          completed=step, history=rows, get_weights=weights, diagnostics=diagnostics,
+                          save_adapter=lambda p: publish_adapter(model, tokenizer, p, dict(identity, completed=step)))
+            phase('training')
+            return path
+
+        phase('training')
+        result = train_updates(model, optimizer, order,
+                    lambda i: (loss(prepared['items']['training'][i]), prepared['items']['training'][i]['response_tokens']),
+                    journal, start=completed, history=history, stop=stopping, save=save,
+                    before_update=lambda step: phase('compilation') if step == 1 else phase('training') if step == 2 else None,
+                    after_update=(lambda step, rows: development_loss(step) if step in (96, 192) else None) if name == 'training' else None,
+                    memory=memory, report=lambda message: print(message, flush=True))
+        durable_json(output/'training-result.json', result)
+        if result['status'] == 'CLEAN_STOP':
+            return
+        phase('saving')
+        if name == 'probe':
+            save(2, result['history'], False)
+        else:
+            # Check every frozen parameter, not a sample, before publication.
+            after = {n.replace('.base_layer.', '.'): tensor_hash(p)
+                     for n, p in base.named_parameters() if 'lora_' not in n}
+            if after != pristine:
+                raise ValueError('Training changed a frozen original parameter')
+            publish_adapter(model, tokenizer, root/'adapter', dict(identity, completed=192))
+            durable_json(output/'complete.json', dict(status='COMPLETE', updates=192,
+                         loading_seconds=loading_seconds, history=result['history'], diagnostics=diagnostics,
+                         adapter_manifest_sha256=digest(root/'adapter/manifest.json')))
+            return
+
+    if name == 'trained-export':
+        phase('restoring')
+        validate_checkpoint(root/'adapter', dict(identity, completed=192))
+        saved = load_file(str(root/'adapter/adapter_model.safetensors'))
+        set_peft_model_state_dict(model, saved)
+        require_same_adapter(saved, weights())
+        from transformers import AutoTokenizer
+        restored_tokenizer = AutoTokenizer.from_pretrained(root/'adapter', local_files_only=True)
+        if prepare_sequences(restored_tokenizer, prepared['rows'], config) != prepared['items']:
+            raise ValueError('Restored adapter tokenizer changes sequences')
+        durable_json(output/'reload.json', dict(exact_tensors=True, adapter_sha256=digest(root/'adapter/manifest.json')))
+    phase('evaluation')
+    mode(False)
+    indices = [max(range(96), key=lambda i: prepared['items']['training'][i]['input_tokens'])] if name == 'probe' else prepared['panel']
+    answers = []
+    for index in indices:
+        if stopping():
+            return
+        answer = generate(model, tokenizer, generation_input(prepared['items']['training'][index]),
+                          output/f'answer-{index}.json', index=index, maximum=1792, forced=name == 'probe', deadline=240)
+        if answer['status'] not in ('COMPLETE', 'LENGTH_STOP', 'PROBE_COMPLETE'):
+            raise ValueError('Python generation did not complete within its deadline')
+        answers.append(answer)
+        print(f'Python reference {index}: {answer["status"]} | {answer["timing"]["request_seconds"]:.2f}s', flush=True)
+    if name != 'probe':
+        phase('serialization')
+        if name == 'trained-export':
+            model = merge_model(model, generation_input(prepared['items']['training'][indices[0]]), output)
+            expected = read_json((output/'merge.json').read_bytes())['after']
+        else:
+            expected = pristine
+        publish_merged(model, tokenizer, output/'model', expected)
+    durable_json(output/'complete.json', dict(status='COMPLETE', disposable_updates=2 if name == 'probe' else 0,
+                 loading_seconds=loading_seconds, python_request_seconds=[a['timing']['request_seconds'] for a in answers],
+                 python_output_tokens=[len(a['token_ids']) for a in answers]))
