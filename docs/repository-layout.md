@@ -29,7 +29,7 @@ Before public release, read [the reminder](../notes/project/before-going-public.
 The current plan and label contract live under `notes/training/direct-sol-labeling/`.
 Keep source files available to both the labeling agent and the review browser.
 
-The [historical pilot launcher](../src/proxybench/training/historical_run.py) owns the fixed training schedule and its saved state.
+The [historical launcher](../src/proxybench/training/historical_run.py) owns each reviewed training schedule and its saved state.
 The [live supervisor](../src/proxybench/execution/live.py) owns process cleanup, progress forwarding, and resource limits.
 The [training-label scorer](../src/proxybench/evaluation/training_labels.py) keeps source values separate from origin and quotation diagnostics.
-Read the [pilot guide](qwen35-4b-historical-pilot.md) before user-launched GPU work.
+Read the [expanded guide](qwen35-4b-historical-expanded.md) before the expanded user-launched GPU run.

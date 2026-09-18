@@ -99,3 +99,14 @@ class TrajectoryTests(unittest.TestCase):
 
     def test_loss_uses_answer_token_weights(self):
         self.assertEqual(weighted_loss([dict(loss=2, response_tokens=3), dict(loss=4, response_tokens=1)]), 2.5)
+
+    def test_configured_checkpoint_interval_covers_expanded_schedule(self):
+        model, optimizer, loss = self.build()
+        saved = []
+        with tempfile.TemporaryDirectory() as tmp:
+            result = train_updates(model, optimizer, list(range(8)), loss, Path(tmp)/'journal.json',
+                                   checkpoint_interval=2,
+                                   save=lambda step, history, clean: saved.append((step, clean)),
+                                   report=lambda _: None)
+        self.assertEqual(result['completed'], 8)
+        self.assertEqual(saved, [(2, False), (4, False), (6, False), (8, False)])

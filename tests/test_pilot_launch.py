@@ -23,7 +23,8 @@ class PilotLaunchTests(unittest.TestCase):
             durable_json(root/'state.json', state)
             durable_json(root/'prepared.json', dict(order=list(range(192))))
             durable_json(root/'training-journal.json', dict(status='CLEAN_STOP', checkpoint=str(root/'checkpoint')))
-            config = dict(minimum_disk_bytes=0, limits={}, cpu_limits={})
+            config = dict(minimum_disk_bytes=0, limits={}, cpu_limits={},
+                          training_examples=96, development_examples=24, updates=192)
             calls = []
             def supervise(command, output, limits, **kwargs):
                 calls.append(kwargs['phase'])
@@ -46,7 +47,8 @@ class PilotLaunchTests(unittest.TestCase):
                          completed_phases={}, attempts={}, reservations={n: s for n, _, s in PHASES})
             durable_json(root/'prepared.json', dict(order=list(range(192))))
             durable_json(root/'state.json', state)
-            config = dict(minimum_disk_bytes=0, limits={}, cpu_limits={})
+            config = dict(minimum_disk_bytes=0, limits={}, cpu_limits={},
+                          training_examples=96, development_examples=24, updates=192)
             calls = []
             def fake_supervise(command, output, limits, **kwargs):
                 phase = kwargs['phase']
@@ -74,7 +76,7 @@ class PilotLaunchTests(unittest.TestCase):
                 self.assertEqual(calls.count('training'), 1)
                 final.assert_called_once()
 
-    def test_engine_evaluates_all_24_malformed_answers(self):
+    def test_engine_evaluates_all_configured_malformed_answers(self):
         try:
             import transformers
         except ImportError:
@@ -102,8 +104,10 @@ class PilotLaunchTests(unittest.TestCase):
             from proxybench.training.smoke import digest
             durable_json(conversion/'complete.json', dict(status='COMPLETE', path=str(root/'model.gguf'), sha256=digest(root/'model.gguf')))
             durable_json(root/'state.json', dict(completed_phases={'original-conversion': dict(output=str(conversion))}))
-            durable_json(root/'prepared.json', dict(items={'development': [dict(input_ids=[1], input_tokens=1)]*24},
-                         rows={'development': [dict(messages=[dict(role='user', content='source')])]*24}))
+            development_examples = 3
+            durable_json(root/'prepared.json', dict(
+                items={'development': [dict(input_ids=[1], input_tokens=1)]*development_examples},
+                rows={'development': [dict(messages=[dict(role='user', content='source')])]*development_examples}))
             durable_json(root/'pin.json', dict(files={}, library_path=''))
             durable_json(root/'engine.json', dict(server_arguments=[], startup_seconds=1))
             calls = []
@@ -127,7 +131,7 @@ class PilotLaunchTests(unittest.TestCase):
                  contextlib.redirect_stdout(io.StringIO()):
                 sock.return_value.__enter__.return_value.getsockname.return_value = ('127.0.0.1', 12345)
                 engine(root, 'baseline', output, dict(engine_root=str(root), runtime_pin=str(root/'pin.json'),
-                       engine_configuration=str(root/'engine.json')))
-            self.assertEqual(calls, list(range(24)))
-            self.assertEqual(len(list(output.glob('answer-*.json'))), 24)
+                       engine_configuration=str(root/'engine.json'), development_examples=development_examples))
+            self.assertEqual(calls, list(range(development_examples)))
+            self.assertEqual(len(list(output.glob('answer-*.json'))), development_examples)
             self.assertTrue((output/'complete.json').exists())

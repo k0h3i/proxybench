@@ -132,6 +132,7 @@ def gpu_phase(root, name, output, config):
         result = train_updates(model, optimizer, order,
                     lambda i: (loss(prepared['items']['training'][i]), prepared['items']['training'][i]['response_tokens']),
                     journal, start=completed, history=history, stop=stopping, save=save,
+                    checkpoint_interval=config['updates']//4,
                     before_update=lambda step: phase('compilation') if step == 1 else phase('training') if step == 2 else None,
                     memory=memory, report=lambda message: print(message, flush=True))
         durable_json(output/'training-result.json', result)
@@ -142,15 +143,15 @@ def gpu_phase(root, name, output, config):
                  for n, p in base.named_parameters() if 'lora_' not in n}
         if after != pristine:
             raise ValueError('Training changed a frozen original parameter')
-        publish_adapter(model, tokenizer, root/'adapter', dict(identity, completed=192))
-        durable_json(output/'complete.json', dict(status='COMPLETE', updates=192,
+        publish_adapter(model, tokenizer, root/'adapter', dict(identity, completed=config['updates']))
+        durable_json(output/'complete.json', dict(status='COMPLETE', updates=config['updates'],
                      loading_seconds=loading_seconds, history=result['history'],
                      adapter_manifest_sha256=digest(root/'adapter/manifest.json')))
         return
 
     if name == 'trained-export':
         phase('restoring')
-        validate_checkpoint(root/'adapter', dict(identity, completed=192))
+        validate_checkpoint(root/'adapter', dict(identity, completed=config['updates']))
         saved = load_file(str(root/'adapter/adapter_model.safetensors'))
         set_peft_model_state_dict(model, saved)
         require_same_adapter(saved, weights())

@@ -129,7 +129,7 @@ def engine(root, name, output, config):
     tokenizer = AutoTokenizer.from_pretrained(root/'tokenizer', local_files_only=True)
     panel = name.endswith('panel')
     split = 'training' if panel else 'development'
-    indices = prepared['panel'] if panel else list(range(24))
+    indices = prepared['panel'] if panel else list(range(config['development_examples']))
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]

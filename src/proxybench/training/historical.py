@@ -23,6 +23,23 @@ PHASES = [('training', 'gpu', 1200), ('original-export', 'gpu', 900),
           ('trained-conversion', 'cpu', 600), ('baseline', 'gpu', 1650), ('final', 'gpu', 1350)]
 EVALUATION_PHASES = tuple(n for n, _, _ in PHASES if n != 'training')
 
+ACCEPTED_RELEASES = {
+    'data/annotations/sol-historical-20260917-b10': dict(
+        training_examples=96, development_examples=24,
+        release_hashes={
+            'manifest.json': '2c430590e945919b7768eb2dc725d6fbaf8479be1e99cd5bfb84d479d87053fc',
+            'training.jsonl': '3846a5a1ba7834430c6a30d71ea0442a630d90b04a816940eaca43c5a3aa0225',
+            'development.jsonl': '7f5b90585cf9ae36a54800bae9b8898566460e91787829f95d42fae2779c710e',
+            'policy.md': '04e4950a4ad5e45b34f543ead1971459722fe61d49b7117684445849d9568bae'}),
+    'data/annotations/sol-historical-20260917-b18': dict(
+        training_examples=174, development_examples=42,
+        release_hashes={
+            'manifest.json': '61967e39aba5f5d1a8249fe955c097419f5eea400f687004ffe009f5ac4db4e2',
+            'training.jsonl': '1932588c3eb4bd578aff8bae87bcab49dc3fc9fff7c116aef11e87dd20a1f58d',
+            'development.jsonl': '229e03d17e8c75454b7078b1be3ea447603f21dd02fe49a3c6c5ebbb5ba0ab8f',
+            'policy.md': '04e4950a4ad5e45b34f543ead1971459722fe61d49b7117684445849d9568bae'}),
+}
+
 
 def binding(value):
     return sha(json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode())
@@ -40,13 +57,18 @@ def check_files(files):
 
 def read_configuration(path):
     config = read_json(Path(path).read_bytes())
-    expected = dict(training_examples=96, development_examples=24, epochs=2, updates=192,
-                    batch_size=1, accumulation=1, seed=42, rank=8, alpha=16, dropout=0,
+    expected = dict(epochs=2, batch_size=1, accumulation=1, seed=42, rank=8, alpha=16, dropout=0,
                     learning_rate=.0001, weight_decay=0, max_grad_norm=1.0,
                     context_tokens=5120, input_tokens=3328, response_tokens=1792,
                     python_request_seconds=240, engine_request_seconds=60)
     if any(config.get(key) != value for key, value in expected.items()):
         raise ValueError('Configuration differs from the reviewed recipe')
+    release = ACCEPTED_RELEASES.get(config.get('release'))
+    if release is None:
+        raise ValueError('Configuration does not select a reviewed dataset release')
+    counts = {key: config.get(key) for key in ('training_examples', 'development_examples')}
+    if counts != {key: release[key] for key in counts} or config.get('updates') != config['training_examples'] * config['epochs']:
+        raise ValueError('Configuration counts differ from the selected release')
     if (config['limits']['total_seconds'] != 7200 or config['cpu_limits']['total_seconds'] != 3600
             or any(config[k]['phase_seconds'] != 1800 or config[k]['grace_seconds'] != 30
                    or config[k]['fixed_phase'] is not True for k in ('limits', 'cpu_limits'))):
@@ -58,11 +80,7 @@ def read_configuration(path):
                    or config[k]['sample_seconds'] > 1 for k in ('limits', 'cpu_limits'))):
         raise ValueError('Configuration weakens the reviewed memory or disk limits')
     # Pin data and model independently of editable configuration values.
-    fixed = {'manifest.json': '2c430590e945919b7768eb2dc725d6fbaf8479be1e99cd5bfb84d479d87053fc',
-             'training.jsonl': '3846a5a1ba7834430c6a30d71ea0442a630d90b04a816940eaca43c5a3aa0225',
-             'development.jsonl': '7f5b90585cf9ae36a54800bae9b8898566460e91787829f95d42fae2779c710e',
-             'policy.md': '04e4950a4ad5e45b34f543ead1971459722fe61d49b7117684445849d9568bae'}
-    if (config['release_hashes'] != fixed or config['model_id'] != 'Qwen/Qwen3.5-4B'
+    if (config['release_hashes'] != release['release_hashes'] or config['model_id'] != 'Qwen/Qwen3.5-4B'
             or config['model_revision'] != '851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a'):
         raise ValueError('Pinned data or model identity differs')
     return config
@@ -138,8 +156,9 @@ def prepare_run(root, config, configuration_path):
     release = Path(config['release'])
     check_files({str(release/name): value for name, value in config['release_hashes'].items()})
     rows, manifest = read_release(release)
-    if set(rows) != {'training', 'development'} or {k: len(v) for k, v in rows.items()} != {'training': 96, 'development': 24}:
-        raise ValueError('Expected only the accepted 96 training and 24 development examples')
+    expected_counts = {key: config[key + '_examples'] for key in ('training', 'development')}
+    if set(rows) != set(expected_counts) or {k: len(v) for k, v in rows.items()} != expected_counts:
+        raise ValueError('Dataset row counts differ from the reviewed configuration')
     policy = (release/'policy.md').read_text()
     for meta in manifest['examples']:
         check_packet(Path.cwd(), meta['packet'], policy)
@@ -153,10 +172,13 @@ def prepare_run(root, config, configuration_path):
     tokenizer = AutoTokenizer.from_pretrained(config['model'], local_files_only=True)
     items = prepare_sequences(tokenizer, rows, config)
     tokenizer.save_pretrained(root/'tokenizer')
-    prepared = dict(items=items, rows=rows, examples=manifest['examples'], order=sample_order(),
+    prepared = dict(items=items, rows=rows, examples=manifest['examples'],
+                    order=sample_order(config['training_examples'], config['epochs'], config['seed']),
                     panel=panel_indices(items['training']), eos=tokenizer.eos_token_id, pad=tokenizer.pad_token_id)
     durable_json(root/'prepared.json', prepared)
-    print('CPU sequences: 96 training, 24 development, 192 updates. Hashing runtime files.', flush=True)
+    print(f'CPU sequences: {config["training_examples"]} training, '
+          f'{config["development_examples"]} development, {config["updates"]} updates. '
+          'Hashing runtime files.', flush=True)
     code = inventory(Path('src/proxybench').rglob('*.py'))
     inputs = inventory([*release.rglob('*'), Path(config['provenance']), Path(configuration_path),
                         *(Path(m['packet']['manifest']['source_path']) for m in manifest['examples'])])

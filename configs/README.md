@@ -12,6 +12,10 @@ The [historical pilot configuration](qwen35-4b-historical-pilot.json) pins the a
 It uses the existing local environment and a two-hour total GPU ceiling.
 The [pilot guide](../docs/qwen35-4b-historical-pilot.md) provides user-run commands and stop/resume instructions.
 
+The [expanded historical configuration](qwen35-4b-historical-expanded.json) pins accepted batch 18.
+It uses all 174 training examples and all 42 development examples.
+The [expanded guide](../docs/qwen35-4b-historical-expanded.md) gives the preparation, training, evaluation, and review commands.
+
 The older `qwen35-preparation.json` and `requirements-gpu-preparation.txt` describe the earlier 9B probe.
 They do not define the selected 4B test.
 Preserve them as records of earlier work.

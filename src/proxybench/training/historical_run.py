@@ -39,18 +39,19 @@ def create_final_review(root, state, prepared):
     print(f'REVIEW_REQUIRED: {review / "index.html"}', flush=True)
 
 
-def validate_transition(action, state):
+def validate_transition(action, state, updates=None):
     required = {'train': {'TRAINING_READY', 'CLEAN_STOP'}, 'resume': {'CLEAN_STOP'},
                 'evaluate': {'TRAINED', 'EVALUATION_PAUSED', 'REVIEW_REQUIRED'}}
     if state.get('operation') != 'separate' or state['status'] not in required[action]:
         raise ValueError(f'{action} cannot launch a run in state {state["status"]}')
     if action == 'evaluate' and 'training' not in state['completed_phases']:
-        raise ValueError('Complete all 192 training updates before evaluation')
+        count = f' all {updates}' if updates is not None else ''
+        raise ValueError(f'Complete{count} training updates before evaluation')
 
 
 def launch(root, config, configuration, action):
     _, state = validate_identity(root, config)
-    validate_transition(action, state)
+    validate_transition(action, state, config['updates'])
     prepared = read_json((root/'prepared.json').read_bytes())
     if action == 'evaluate' and state['status'] == 'REVIEW_REQUIRED':
         review = Path(state['review'])
@@ -66,8 +67,10 @@ def launch(root, config, configuration, action):
         journal = read_json((root/'training-journal.json').read_bytes())
         require_clean_stop(journal, Path(journal['checkpoint']), dict(run=state['identity'], order=binding(prepared['order'])))
     phases = ['training'] if training else list(EVALUATION_PHASES)
-    print('Training: 96 examples, 192 updates, then save and exit.' if training else
-          'Evaluation: original and trained models on the same 24 development examples.', flush=True)
+    print((f'Training: {config["training_examples"]} examples, {config["updates"]} updates, then save and exit.')
+          if training else
+          (f'Evaluation: original and trained models on the same '
+           f'{config["development_examples"]} development examples.'), flush=True)
     print('Limits: 120 cumulative GPU minutes, 60 CPU minutes, 30 minutes per phase.', flush=True)
     for name in phases:
         if name in state['completed_phases']:
@@ -106,7 +109,7 @@ def launch(root, config, configuration, action):
             print(f'{status}: {name}. Saved outputs and resource ledgers remain in {root}.', flush=True)
             return 130 if status == 'CLEAN_STOP' else 1
         completion = read_json(complete.read_bytes())
-        if completion.get('status') != 'COMPLETE' or (training and completion.get('updates') != 192):
+        if completion.get('status') != 'COMPLETE' or (training and completion.get('updates') != config['updates']):
             state.update(status='FAILED', failed_phase=name, error='Invalid completion record')
             durable_json(root/'state.json', state)
             raise ValueError('Worker completion record is invalid')
@@ -121,7 +124,7 @@ def launch(root, config, configuration, action):
             print('EVALUATION_PAUSED after a complete phase. Run evaluate to continue.', flush=True)
             return 130
     if training:
-        print(f'TRAINED: 192 updates saved in {root / "adapter"}. Training ended.', flush=True)
+        print(f'TRAINED: {config["updates"]} updates saved in {root / "adapter"}. Training ended.', flush=True)
         return 0
     create_final_review(root, state, prepared)
     return 3

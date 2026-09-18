@@ -143,6 +143,10 @@ class PilotAdmissionTests(unittest.TestCase):
         self.assertEqual(order, sample_order())
         self.assertEqual(sorted(order[:96]), list(range(96)))
         self.assertEqual(sorted(order[96:]), list(range(96)))
+        expanded = sample_order(174, 2, 42)
+        self.assertEqual(len(expanded), 348)
+        self.assertEqual(sorted(expanded[:174]), list(range(174)))
+        self.assertEqual(sorted(expanded[174:]), list(range(174)))
         self.assertEqual(panel_indices([dict(input_tokens=10, response_tokens=10),
                                         dict(input_tokens=1, response_tokens=9), dict(input_tokens=2, response_tokens=1)]), [0, 1, 2])
 
@@ -174,12 +178,18 @@ class PilotAdmissionTests(unittest.TestCase):
 
     def test_recipe_and_file_hash_refusals(self):
         config = read_configuration('configs/qwen35-4b-historical-pilot.json')
+        expanded = read_configuration('configs/qwen35-4b-historical-expanded.json')
+        self.assertEqual((expanded['training_examples'], expanded['development_examples'], expanded['updates']),
+                         (174, 42, 348))
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/'configuration.json'
             for key, value in [('updates', 96), ('accumulation', 4), ('model_revision', 'different')]:
                 path.write_text(json.dumps(dict(config, **{key: value})))
                 with self.assertRaises(ValueError):
                     read_configuration(path)
+            path.write_text(json.dumps(dict(expanded, training_examples=96)))
+            with self.assertRaises(ValueError):
+                read_configuration(path)
             with self.assertRaises(ValueError):
                 check_files({str(path): 'wrong'})
 
