@@ -18,11 +18,10 @@ from proxybench.training.smoke import digest, read_json
 from proxybench.training.trajectory import sample_order
 
 # Reservations already include the reviewed 25 percent allowance.
-PHASES = [('probe', 'gpu', 450), ('original-export', 'gpu', 900),
-          ('original-conversion', 'cpu', 600), ('original-panel', 'gpu', 300),
-          ('baseline', 'gpu', 1650), ('training', 'gpu', 1200),
-          ('trained-export', 'gpu', 900), ('trained-conversion', 'cpu', 600),
-          ('trained-panel', 'gpu', 300), ('final', 'gpu', 1350)]
+PHASES = [('training', 'gpu', 1200), ('original-export', 'gpu', 900),
+          ('original-conversion', 'cpu', 600), ('trained-export', 'gpu', 900),
+          ('trained-conversion', 'cpu', 600), ('baseline', 'gpu', 1650), ('final', 'gpu', 1350)]
+EVALUATION_PHASES = tuple(n for n, _, _ in PHASES if n != 'training')
 
 
 def binding(value):
@@ -170,7 +169,7 @@ def prepare_run(root, config, configuration_path):
                               if d.metadata['Name']},
                     prepared_sha256=digest(root/'prepared.json'), tokenizer=inventory((root/'tokenizer').rglob('*')))
     durable_json(root/'identity.json', identity)
-    durable_json(root/'state.json', dict(status='PREPARED', completed_phases={}, attempts={},
+    durable_json(root/'state.json', dict(status='TRAINING_READY', operation='separate', completed_phases={}, attempts={},
                                        identity=binding(identity), reservations={n: s for n, _, s in PHASES}))
 
 
@@ -199,18 +198,62 @@ def validate_identity(root, config):
     return identity, state
 
 
-def admit_schedule(state, entries, *, phase):
+def reuse_prepared_run(root, config):
+    """Reuse intact prepared data before training and preserve previous run records."""
+    identity = read_json((root/'identity.json').read_bytes())
+    state = read_json((root/'state.json').read_bytes())
+    if (state['status'] not in {'PREPARED', 'EXPORT_REJECTED'} or state.get('operation')
+            or 'training' in state.get('attempts', {}) or (root/'training-journal.json').exists()
+            or (root/'adapter').exists() or (root/'previous-run.json').exists()):
+        raise ValueError('Reuse requires prepared data before retained training starts')
+    if binding(identity) != state['identity'] or identity['configuration'] != config:
+        raise ValueError('Run identity or configuration differs')
+    if (digest(root/'prepared.json') != identity['prepared_sha256']
+            or str(Path(sys.executable).absolute()) != identity['executable'] or sys.version != identity['python']):
+        raise ValueError('Prepared sequences or Python runtime changed')
+    for key in ('inputs', 'model', 'tokenizer'):
+        check_files(identity[key])
+    if runtime_files(config) != identity['runtime']:
+        raise ValueError('Runtime file inventory changed')
+    changed = {'src/proxybench/training/historical.py', 'src/proxybench/training/historical_run.py',
+               'src/proxybench/training/historical_worker.py'}
+    check_files({k: v for k, v in identity['code'].items() if k not in changed})
+    code = inventory(Path('src/proxybench').rglob('*.py'))
+    if set(code) != set(identity['code']):
+        raise ValueError('Source file inventory changed')
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    for name in changed:
+        if sha(subprocess.check_output(['git', 'show', f'{revision}:{name}'])) != code[name]:
+            raise ValueError('Commit and test the separate-operation code before reusing this run')
+    for completed in state['completed_phases'].values():
+        check_files(completed['files'])
+    ledgers = {}
+    for resource in ('cpu', 'gpu'):
+        path = root/f'{resource}-ledger.jsonl'
+        if path.with_suffix('.active.json').exists():
+            raise ValueError('A worker is still active')
+        ledger_entries(path)
+        ledgers[str(path)] = digest(path)
+    durable_json(root/'previous-run.json', dict(identity=identity, state=state, ledger_hashes=ledgers))
+    identity.update(code=code, git_commit=revision)
+    identity['inputs'].update(inventory([root/'previous-run.json']))
+    state.update(status='TRAINING_READY', operation='separate', identity=binding(identity))
+    state.pop('error', None)
+    state.pop('active_phase', None)
+    durable_json(root/'identity.json', identity)
+    durable_json(root/'state.json', state)
+    check_files(ledgers)
+
+
+def admit_schedule(state, entries, *, phase, operation=None):
     index = next(i for i, p in enumerate(PHASES) if p[0] == phase)
     resource = PHASES[index][1]
     used = sum(e['elapsed_seconds'] for e in entries[resource])
     phase_used = sum(e['elapsed_seconds'] for e in entries[resource] if e.get('phase') == phase)
     remaining = {n: state['reservations'][n] for n, r, _ in PHASES[index:] if r == resource
+                 and (operation is None or n in operation)
                  and n not in state['completed_phases']}
     reserve = 120 if resource == 'gpu' else 0
-    if resource == 'gpu':
-        tail = sum(v for k, v in remaining.items() if k in {'trained-panel', 'final'}) + reserve
-        if any(k in remaining for k in ('trained-panel', 'final')):
-            reserve += max(0, 1500-tail)
     if (used+sum(remaining.values())+reserve > (7200 if resource == 'gpu' else 3600)
             or phase_used+remaining[phase] > 1800):
         raise ValueError('The complete remaining schedule does not fit the cumulative or phase budget')

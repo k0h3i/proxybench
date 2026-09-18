@@ -164,10 +164,10 @@ class PilotAdmissionTests(unittest.TestCase):
     def test_full_remaining_schedule_and_phase_consumption(self):
         state = dict(completed_phases={}, reservations={n: s for n, _, s in PHASES})
         empty = dict(cpu=[], gpu=[])
-        result = admit_schedule(state, empty, phase='probe')
-        self.assertEqual(sum(result['remaining'].values())+result['stop_reserve_seconds'], 7170)
+        result = admit_schedule(state, empty, phase='training')
+        self.assertEqual(sum(result['remaining'].values())+result['stop_reserve_seconds'], 6120)
         with self.assertRaises(ValueError):
-            admit_schedule(state, dict(cpu=[], gpu=[dict(phase='probe', elapsed_seconds=31)]), phase='probe')
+            admit_schedule(state, dict(cpu=[], gpu=[dict(phase='training', elapsed_seconds=1081)]), phase='training')
         state['completed_phases'] = {n: {} for n, _, _ in PHASES if n != 'final'}
         with self.assertRaises(ValueError):
             admit_schedule(state, dict(cpu=[], gpu=[dict(phase='final', elapsed_seconds=451)]), phase='final')
@@ -186,11 +186,11 @@ class PilotAdmissionTests(unittest.TestCase):
     def test_overwrite_and_state_transition_refusals(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(FileExistsError):
             main(['prepare', '--run', tmp])
-        for action in ('run', 'continue', 'resume', 'repair'):
+        for action in ('train', 'evaluate', 'resume'):
             with self.assertRaises(ValueError):
                 validate_transition(action, dict(status='COMPLETE'))
         with self.assertRaises(ValueError):
-            validate_transition('repair', dict(status='FAILED', failed_phase='training'))
+            validate_transition('train', dict(status='FAILED', failed_phase='training', operation='separate'))
 
     def test_review_bound_to_exact_evidence_before_reveal(self):
         meta = dict(packet=dict(manifest=dict(blocks=[dict(target=True, cells=[dict(text='Selected nominee')])])) )

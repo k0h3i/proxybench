@@ -11,7 +11,7 @@ from proxybench.training.checkpoints import publish_adapter, validate_checkpoint
 from proxybench.training.historical import binding, prepare_sequences
 from proxybench.training.optimization import merge_model, tensor_hash
 from proxybench.training.smoke import ResponseCollator, adapter_targets, digest, generation_input, read_json, require_same_adapter
-from proxybench.training.trajectory import publish_state, require_clean_stop, restore_state, train_updates, weighted_loss
+from proxybench.training.trajectory import publish_state, require_clean_stop, restore_state, train_updates
 
 
 def phase(name):
@@ -25,6 +25,8 @@ def stopping():
 
 
 def gpu_phase(root, name, output, config):
+    if name not in {'training', 'original-export', 'trained-export'}:
+        raise ValueError('Expected training or an evaluation export')
     # Import order is required by the pinned environment.
     phase('loading')
     begin = time.monotonic()
@@ -34,7 +36,6 @@ def gpu_phase(root, name, output, config):
     from safetensors.torch import load_file
     from transformers import set_seed
     from unsloth_zoo.loss_utils import fused_linear_cross_entropy
-    from proxybench.extraction.measured_generation import generate
     from proxybench.training.merged_export import publish_merged
 
     prepared = read_json((root/'prepared.json').read_bytes())
@@ -84,15 +85,6 @@ def gpu_phase(root, name, output, config):
             raise ValueError('Free device memory fell below 2 GiB')
         return dict(allocated_bytes=torch.cuda.memory_allocated(), free_bytes=free, total_bytes=total)
 
-    def mode(training):
-        if training:
-            FastLanguageModel.for_training(model, use_gradient_checkpointing='unsloth')
-            model.train()
-            base.config.use_cache = False
-        else:
-            FastLanguageModel.for_inference(model)
-            model.eval()
-
     def loss(item):
         values = {k: v.to('cuda') for k, v in collator([item]).items()}
         hidden = backbone(input_ids=values['input_ids'], attention_mask=values['attention_mask'],
@@ -107,14 +99,16 @@ def gpu_phase(root, name, output, config):
     if stopping():
         return
 
-    if name in ('probe', 'training'):
-        mode(True)
+    if name == 'training':
+        FastLanguageModel.for_training(model, use_gradient_checkpointing='unsloth')
+        model.train()
+        base.config.use_cache = False
         optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
                                       lr=1e-4, weight_decay=0)
-        order = prepared['order'] if name == 'training' else [max(range(96), key=lambda i: prepared['items']['training'][i]['combined_tokens'])]*2
+        order = prepared['order']
         completed, history, diagnostics = 0, [], {}
-        journal = root/'training-journal.json' if name == 'training' else output/'journal.json'
-        if name == 'training' and journal.exists():
+        journal = root/'training-journal.json'
+        if journal.exists():
             previous = read_json(journal.read_bytes())
             checkpoint = Path(previous['checkpoint'])
             completed = require_clean_stop(previous, checkpoint, identity)
@@ -123,32 +117,9 @@ def gpu_phase(root, name, output, config):
             history, diagnostics = restored['history'], restored['diagnostics']
             durable_json(output/'restored.json', dict(completed=completed, checkpoint=str(checkpoint), exact_state=True))
 
-        def development_loss(step):
-            if str(step) in diagnostics:
-                return
-            phase('development-loss')
-            model.eval()
-            rows = []
-            for index, item in enumerate(prepared['items']['development']):
-                if stopping():
-                    raise InterruptedError('Stopped during development loss; no clean training checkpoint')
-                with torch.no_grad():
-                    value = loss(item)
-                if not torch.isfinite(value):
-                    raise ValueError('Nonfinite development loss')
-                rows.append(dict(index=index, loss=value.item(), response_tokens=item['response_tokens']))
-            diagnostics[str(step)] = dict(rows=rows, token_weighted_loss=weighted_loss(rows))
-            durable_json(output/f'development-loss-{step}.json', diagnostics[str(step)])
-            print(f'development loss at step {step}: {weighted_loss(rows):.6f}', flush=True)
-            model.train()
-            phase('training')
-
-        if name == 'training' and completed in (0, 96, 192):
-            development_loss(completed)
-
         def save(step, rows, clean):
             phase('saving')
-            checkpoints = root/'checkpoints' if name == 'training' else output/'checkpoints'
+            checkpoints = root/'checkpoints'
             suffix = '-stop-'+output.name if clean else ''
             path = checkpoints/f'step-{step:03}{suffix}'
             publish_state(model, optimizer, tokenizer, path, identity=identity, order=order,
@@ -162,25 +133,20 @@ def gpu_phase(root, name, output, config):
                     lambda i: (loss(prepared['items']['training'][i]), prepared['items']['training'][i]['response_tokens']),
                     journal, start=completed, history=history, stop=stopping, save=save,
                     before_update=lambda step: phase('compilation') if step == 1 else phase('training') if step == 2 else None,
-                    after_update=(lambda step, rows: development_loss(step) if step in (96, 192) else None) if name == 'training' else None,
                     memory=memory, report=lambda message: print(message, flush=True))
         durable_json(output/'training-result.json', result)
         if result['status'] == 'CLEAN_STOP':
             return
         phase('saving')
-        if name == 'probe':
-            save(2, result['history'], False)
-        else:
-            # Check every frozen parameter, not a sample, before publication.
-            after = {n.replace('.base_layer.', '.'): tensor_hash(p)
-                     for n, p in base.named_parameters() if 'lora_' not in n}
-            if after != pristine:
-                raise ValueError('Training changed a frozen original parameter')
-            publish_adapter(model, tokenizer, root/'adapter', dict(identity, completed=192))
-            durable_json(output/'complete.json', dict(status='COMPLETE', updates=192,
-                         loading_seconds=loading_seconds, history=result['history'], diagnostics=diagnostics,
-                         adapter_manifest_sha256=digest(root/'adapter/manifest.json')))
-            return
+        after = {n.replace('.base_layer.', '.'): tensor_hash(p)
+                 for n, p in base.named_parameters() if 'lora_' not in n}
+        if after != pristine:
+            raise ValueError('Training changed a frozen original parameter')
+        publish_adapter(model, tokenizer, root/'adapter', dict(identity, completed=192))
+        durable_json(output/'complete.json', dict(status='COMPLETE', updates=192,
+                     loading_seconds=loading_seconds, history=result['history'],
+                     adapter_manifest_sha256=digest(root/'adapter/manifest.json')))
+        return
 
     if name == 'trained-export':
         phase('restoring')
@@ -193,27 +159,13 @@ def gpu_phase(root, name, output, config):
         if prepare_sequences(restored_tokenizer, prepared['rows'], config) != prepared['items']:
             raise ValueError('Restored adapter tokenizer changes sequences')
         durable_json(output/'reload.json', dict(exact_tensors=True, adapter_sha256=digest(root/'adapter/manifest.json')))
-    phase('evaluation')
-    mode(False)
-    indices = [max(range(96), key=lambda i: prepared['items']['training'][i]['input_tokens'])] if name == 'probe' else prepared['panel']
-    answers = []
-    for index in indices:
-        if stopping():
-            return
-        answer = generate(model, tokenizer, generation_input(prepared['items']['training'][index]),
-                          output/f'answer-{index}.json', index=index, maximum=1792, forced=name == 'probe', deadline=240)
-        if answer['status'] not in ('COMPLETE', 'LENGTH_STOP', 'PROBE_COMPLETE'):
-            raise ValueError('Python generation did not complete within its deadline')
-        answers.append(answer)
-        print(f'Python reference {index}: {answer["status"]} | {answer["timing"]["request_seconds"]:.2f}s', flush=True)
-    if name != 'probe':
-        phase('serialization')
-        if name == 'trained-export':
-            model = merge_model(model, generation_input(prepared['items']['training'][indices[0]]), output)
-            expected = read_json((output/'merge.json').read_bytes())['after']
-        else:
-            expected = pristine
-        publish_merged(model, tokenizer, output/'model', expected)
-    durable_json(output/'complete.json', dict(status='COMPLETE', disposable_updates=2 if name == 'probe' else 0,
-                 loading_seconds=loading_seconds, python_request_seconds=[a['timing']['request_seconds'] for a in answers],
-                 python_output_tokens=[len(a['token_ids']) for a in answers]))
+    phase('serialization')
+    if name == 'trained-export':
+        FastLanguageModel.for_inference(model)
+        model.eval()
+        model = merge_model(model, generation_input(prepared['items']['training'][0]), output)
+        expected = read_json((output/'merge.json').read_bytes())['after']
+    else:
+        expected = pristine
+    publish_merged(model, tokenizer, output/'model', expected)
+    durable_json(output/'complete.json', dict(status='COMPLETE', loading_seconds=loading_seconds))

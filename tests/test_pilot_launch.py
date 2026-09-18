@@ -17,8 +17,8 @@ class PilotLaunchTests(unittest.TestCase):
     def test_resume_command_starts_at_training_and_keeps_prior_phases(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            prior = {name: {'output': str(root/name), 'files': {}} for name, _, _ in PHASES[:5]}
-            state = dict(status='CLEAN_STOP', identity='one', completed_phases=prior, attempts={},
+            prior = {name: {'output': str(root/name), 'files': {}} for name in ('probe', 'original-export', 'original-conversion', 'original-panel')}
+            state = dict(status='CLEAN_STOP', operation='separate', identity='one', completed_phases=prior, attempts={},
                          reservations={n: s for n, _, s in PHASES})
             durable_json(root/'state.json', state)
             durable_json(root/'prepared.json', dict(order=list(range(192))))
@@ -31,9 +31,7 @@ class PilotLaunchTests(unittest.TestCase):
             with patch('proxybench.training.historical_run.read_configuration', return_value=config), \
                  patch('proxybench.training.historical_run.validate_identity', return_value=({}, state)), \
                  patch('proxybench.training.historical_run.require_clean_stop', return_value=7) as boundary, \
-                 patch('proxybench.training.historical_run.update_estimates'), \
                  patch('proxybench.training.historical_run.environment', return_value={}), \
-                 patch('proxybench.training.historical_run.subprocess.check_output', return_value='RTX 3090'), \
                  patch('proxybench.training.historical_run.supervise', supervise), \
                  contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(['resume', '--run', str(root)]), 130)
@@ -41,52 +39,40 @@ class PilotLaunchTests(unittest.TestCase):
                 self.assertEqual(boundary.call_count, 2)
             self.assertEqual(json.loads((root/'state.json').read_text())['completed_phases'], prior)
 
-    def test_user_run_and_continue_reuse_every_completed_phase(self):
+    def test_training_saves_and_exits_then_evaluation_requires_another_command(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            state = dict(status='PREPARED', identity='identity', completed_phases={}, attempts={},
-                         reservations={n: s for n, _, s in PHASES})
-            prepared = dict(order=list(range(192)), panel=[0, 1, 2], examples=[], rows={})
-            durable_json(root/'prepared.json', prepared)
+            state = dict(status='TRAINING_READY', operation='separate', identity='identity',
+                         completed_phases={}, attempts={}, reservations={n: s for n, _, s in PHASES})
+            durable_json(root/'prepared.json', dict(order=list(range(192))))
             durable_json(root/'state.json', state)
+            config = dict(minimum_disk_bytes=0, limits={}, cpu_limits={})
             calls = []
             def fake_supervise(command, output, limits, **kwargs):
-                phase = command[command.index('--phase')+1]
+                phase = kwargs['phase']
                 calls.append(phase)
-                durable_json(output.parent/'complete.json', dict(status='COMPLETE'))
+                durable_json(output.parent/'complete.json', dict(status='COMPLETE', updates=192))
                 return 'EXITED'
-            def gate(root, state, prepared, name):
-                if name == 'original-panel':
-                    review = root/'review-original'
-                    review.mkdir()
-                    (review/'accepted.json').write_text('{}')
-                    from proxybench.training.smoke import digest
-                    state.update(status='REVIEW_REQUIRED', review=str(review), next_phase=name,
-                                 accepted_review_sha256=digest(review/'accepted.json'))
-                    durable_json(root/'state.json', state)
-                    return False
-                return True
             def validate(root, config):
                 return {}, json.loads((root/'state.json').read_text())
-            config = dict(minimum_disk_bytes=0, limits={}, cpu_limits={})
             with patch('proxybench.training.historical_run.validate_identity', validate), \
-                 patch('proxybench.training.historical_run.update_estimates'), \
                  patch('proxybench.training.historical_run.environment', return_value={}), \
-                 patch('proxybench.training.historical_run.subprocess.check_output', return_value='RTX 3090'), \
                  patch('proxybench.training.historical_run.supervise', fake_supervise), \
-                 patch('proxybench.training.historical_run.gate_exports', gate), \
-                 patch('proxybench.training.historical_run.require_decisions'), \
                  patch('proxybench.training.historical_run.read_configuration', return_value=config), \
                  patch('proxybench.training.historical_run.create_final_review') as final, \
                  contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(main(['run', '--run', str(root)]), 3)
-                self.assertEqual(calls, [p[0] for p in PHASES[:4]])
-                self.assertEqual(main(['continue', '--run', str(root)]), 3)
-                self.assertEqual(calls, [p[0] for p in PHASES])
+                with self.assertRaises(ValueError):
+                    main(['evaluate', '--run', str(root)])
+                self.assertEqual(main(['train', '--run', str(root)]), 0)
+                self.assertEqual(calls, ['training'])
+                self.assertEqual(json.loads((root/'state.json').read_text())['status'], 'TRAINED')
+                final.assert_not_called()
+                with self.assertRaises(ValueError):
+                    main(['train', '--run', str(root)])
+                self.assertEqual(main(['evaluate', '--run', str(root)]), 3)
+                self.assertEqual(calls, [n for n, _, _ in PHASES])
                 self.assertEqual(calls.count('training'), 1)
                 final.assert_called_once()
-                with self.assertRaises(ValueError):
-                    launch(root, config, Path('config.json'), 'run')
 
     def test_engine_evaluates_all_24_malformed_answers(self):
         try:
