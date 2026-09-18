@@ -3,9 +3,10 @@
 import json
 import re
 
-from proxybench.training.labels import read_json, validate
+from proxybench.training.labels import TYPES, read_json, validate
 
 SCORER_VERSION = 'historical-pilot-v1'
+EXPORT_COMPARISON_VERSION = 'historical-export-v2'
 
 
 def text(value, path):
@@ -118,6 +119,58 @@ def terminal(answer):
     return answer.get('status')
 
 
+def malformed_quotation_changes(left, right):
+    """Inspect complete JSON bodies without repairing or accepting their schema."""
+    def body(text):
+        text = text.strip()
+        wrapper = 'json'
+        if text.startswith('```json\n') and text.endswith('\n```'):
+            text, wrapper = text[8:-4], 'json-fence'
+        value = read_json(text)
+        if not isinstance(value, dict):
+            raise ValueError('Expected one object')
+        fields = value.get('fields') if set(value) == {'fields'} else value
+        if not isinstance(fields, dict) or set(fields) != set(TYPES):
+            raise ValueError('Expected the fourteen named fields')
+        return wrapper, value
+
+    changed = []
+
+    def compare(a, b, path):
+        if type(a) is not type(b):
+            raise ValueError('Value types differ')
+        if isinstance(a, dict):
+            if set(a) != set(b):
+                raise ValueError('Object keys differ')
+            for key in a:
+                child = f'{path}.{key}' if path else key
+                if key == 'raw_text' and a[key] != b[key]:
+                    if (set(a) != {'value', 'availability', 'origin', 'raw_text'}
+                            or a['availability'] != 'PRESENT' or a['value'] == 'OTHER'
+                            or not all(isinstance(v, str) and v.strip() for v in (a[key], b[key]))):
+                        raise ValueError('Quotation changes the field meaning or structure')
+                    changed.append(child)
+                else:
+                    compare(a[key], b[key], child)
+        elif isinstance(a, list):
+            if len(a) != len(b):
+                raise ValueError('Component count differs')
+            for index, (x, y) in enumerate(zip(a, b)):
+                compare(x, y, f'{path}[{index}]')
+        elif a != b:
+            raise ValueError('Nonquotation value differs')
+
+    try:
+        wrapper_a, a = body(left)
+        wrapper_b, b = body(right)
+        if wrapper_a != wrapper_b:
+            return None
+        compare(a, b, '')
+    except (ValueError, TypeError, RecursionError):
+        return None
+    return changed
+
+
 def export_comparison(reference, candidate):
     """Admit exact behavior, or request source review for narrowly allowed differences."""
     if reference.get('prompt_token_ids') != candidate.get('prompt_token_ids'):
@@ -130,6 +183,11 @@ def export_comparison(reference, candidate):
     left, right = parse_answer(reference), parse_answer(candidate)
     if left is None or right is None:
         passed = left is None and right is None and reference['text'] == candidate['text']
+        if not passed and left is None and right is None:
+            changed = malformed_quotation_changes(reference['text'], candidate['text'])
+            if changed is not None:
+                return dict(status='REVIEW_REQUIRED', reason='Malformed quotation comparison',
+                            changed_paths=changed, format_valid=False)
         return dict(status='PASS' if passed else 'FAILED', reason='Malformed output comparison')
     # No origin/derivation changes are permitted for engine admission.
     changed = []

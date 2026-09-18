@@ -11,7 +11,7 @@ import sys
 import time
 
 from proxybench.evaluation.pilot_review import accept_decisions, create_review, finish_report, require_decisions, source_text
-from proxybench.evaluation.training_labels import export_comparison
+from proxybench.evaluation.training_labels import EXPORT_COMPARISON_VERSION, export_comparison
 from proxybench.execution.live import supervise
 from proxybench.execution.resources import durable_json, ledger_entries
 from proxybench.training.historical import (
@@ -76,13 +76,14 @@ def gate_exports(root, state, prepared, phase_name):
     for index in prepared['panel']:
         a, b = left/f'answer-{index}.json', right/f'answer-{index}.json'
         result = export_comparison(read_json(a.read_bytes()), read_json(b.read_bytes()))
+        result['rule'] = EXPORT_COMPARISON_VERSION
         comparisons[str(index)] = result
-        if result['status'] == 'FAILED':
-            durable_json(root/f'{kind}-export-gate.json', comparisons)
-            raise ValueError('Export behavior differs beyond the reviewed equivalence rules')
         if result['status'] == 'REVIEW_REQUIRED':
             cases.append(dict(id=str(index), source=source_text(metadata[index]), answers={'python': str(a), 'engine': str(b)}))
     durable_json(root/f'{kind}-export-gate.json', comparisons)
+    failed = [f'{index}: {result["reason"]}' for index, result in comparisons.items() if result['status'] == 'FAILED']
+    if failed:
+        raise ValueError('Export comparison failed: '+ '; '.join(failed))
     if cases:
         review = create_review(root/f'review-{kind}', cases, identity=state['identity'], kind='export')
         state.update(status='REVIEW_REQUIRED', review=str(review.resolve()), next_phase=phase_name)
@@ -236,7 +237,7 @@ def status_report(root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['prepare', 'run', 'continue', 'resume', 'status', 'review', 'repair', '_worker'])
+    parser.add_argument('action', choices=['prepare', 'run', 'continue', 'resume', 'status', 'review', 'repair', 'amend-export', '_worker'])
     parser.add_argument('--configuration', type=Path, default=Path('configs/qwen35-4b-historical-pilot.json'))
     parser.add_argument('--run', type=Path, required=True)
     parser.add_argument('--decisions', type=Path)
@@ -279,6 +280,13 @@ def main(argv=None):
             if result != 'EXITED':
                 raise ValueError(f'CPU preparation failed: {result}')
             print(f'PREPARED: {root}. No GPU worker started.', flush=True)
+        elif args.action == 'amend-export':
+            from proxybench.training.export_amendment import amend_export
+            amend_export(root, config, args.reason)
+            state = read_json((root/'state.json').read_bytes())
+            prepared = read_json((root/'prepared.json').read_bytes())
+            gate_exports(root, state, prepared, 'original-panel')
+            return 3
         elif args.action == 'review':
             _, state = validate_identity(root, config)
             if state['status'] != 'REVIEW_REQUIRED' or args.decisions is None:

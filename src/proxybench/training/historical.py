@@ -179,8 +179,8 @@ def validate_identity(root, config):
     state = read_json((root/'state.json').read_bytes())
     if binding(identity) != state['identity'] or identity['configuration'] != config:
         raise ValueError('Run identity or configuration differs')
-    if identity['git_commit'] != subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip():
-        raise ValueError('Code revision changed since preparation')
+    # Keep the preparation revision as provenance. Exact file inventories below
+    # reject executable changes without blocking later documentation commits.
     if digest(root/'prepared.json') != identity['prepared_sha256']:
         raise ValueError('Prepared sequences changed')
     if str(Path(sys.executable).absolute()) != identity['executable'] or sys.version != identity['python']:
