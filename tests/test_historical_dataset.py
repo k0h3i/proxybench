@@ -117,6 +117,18 @@ class HistoricalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_assignments([self.packet], bad)
 
+    def test_filing_selection_cap(self):
+        packets = []
+        for index in range(12):
+            packet = deepcopy(self.packet)
+            packet['manifest']['target'] = [index * 2, index * 2 + 1]
+            packets.append(packet)
+        check_assignments(packets, self.assignments)
+        extra = deepcopy(self.packet)
+        extra['manifest']['target'] = [24, 25]
+        with self.assertRaisesRegex(ValueError, '12-target selection cap'):
+            check_assignments(packets + [extra], self.assignments)
+
     def export_inputs(self):
         label = {'fields': {k: dict(value=None, availability='ABSENT_IN_CONTEXT', origin=None, raw_text=None) for k in TYPES}}
         label['fields']['issuer_name'] = dict(value='A & B', availability='PRESENT', origin='EXTRACTED', raw_text='A & B')

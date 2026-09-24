@@ -2,6 +2,7 @@
 
 import math
 import os
+from collections import Counter
 from pathlib import Path
 import tempfile
 
@@ -41,8 +42,12 @@ def length_report(tokenizer, prompt, response):
 def check_assignments(packets, assignments):
     """Mandatory source links must already be resolved into frozen groups."""
     group_splits, identities, targets = {}, set(), {}
+    filing_counts = Counter()
     for packet in packets:
         m = packet['manifest']
+        filing_counts[m['accession']] += 1
+        if filing_counts[m['accession']] > 12:
+            raise ValueError('A filing exceeds the 12-target selection cap')
         assignment = assignments[m['accession']]
         if assignment['split'] != m['split'] or assignment['group_id'] != m['group_id']:
             raise ValueError('Packet differs from its frozen source assignment')
