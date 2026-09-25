@@ -1,37 +1,40 @@
 # ProxyBench
 
-ProxyBench studies extraction of historical SEC Form N-PX proxy-voting records.
-The current labeling workflow uses Sol agents to read local filings and draft structured labels.
-The user edits those drafts in the existing browser review interface.
-Only explicitly accepted labels can become fine-tuning examples.
+ProxyBench extracts one marked proxy-voting target from historical SEC Form N-PX text and HTML.
+ProxyType-4B is the working name for its trained Qwen3.5-4B model.
+The model returns source values and standardized labels under the [label contract](docs/label-contract.md).
+Target selection remains a manual step.
+The project does not recover every record from a complete filing.
 
-The package includes local source readers, editable review pages, record validation, scoring, and local model utilities.
-The [training-label guide](docs/training-labels.md) explains draft review and export of explicitly accepted labels.
-Read the [local review guide](docs/local-review.md) and [repository guide](docs/repository-layout.md).
-The [Qwen3.5-4B guide](docs/qwen35-4b-smoke.md) describes the bounded local training test.
-The [historical pilot guide](docs/qwen35-4b-historical-pilot.md) gives the CPU-tested commands for the accepted 96/24 dataset and 192-update recipe.
-When local notes exist, start with `notes/README.md` for the current plan and label contract.
+## Setup and use
 
-## Faster local inference
-
-On 15 development examples, the merged llama.cpp model reduced median answer time from 137.72 to 18.92 seconds.
-Both methods used the same RTX 3090 GPU, and existing extraction errors remained.
-The [inference guide](docs/qwen35-4b-inference.md) explains the change with a before-and-after diagram, measured results, and limitations.
-
-## Setup and tests
-
-The package requires Python 3.11 or later and declares no runtime dependencies.
-GPU training libraries require a separate environment.
-From the repository root, run these commands:
+Linux and WSL are supported with Python 3.11 or later.
+The CPU package has no runtime dependencies.
+Install optional model libraries in an external environment before model execution.
+The user starts GPU work through the commands in the [training guide](docs/training.md).
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv ../proxybench-env
+source ../proxybench-env/bin/activate
 python -m pip install -e .
+python -m proxybench --help
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-Keep original filings, labels, model weights, and generated output outside ordinary commits.
-The private repository includes [project notes](notes/README.md).
-Before making it public, follow the [public-release reminder](notes/project/before-going-public.md).
-The usage guides in `data/` and `artifacts/` remain tracked exceptions.
+Use the [dataset guide](docs/dataset.md) to prepare source context and accepted labels.
+Read the [training guide](docs/training.md) for training, resume, and evaluation.
+Read the [inference guide](docs/inference.md) for model loading and new fragments.
+The [repository guide](docs/repository-layout.md) explains storage and package boundaries.
+
+## Scope and release status
+
+The retained dataset contains 330 training examples and 90 development examples from 36 source files.
+The development set is exposed reference data, not an untouched test set.
+No independently benchmarked accuracy claim accompanies this model.
+PDF processing, OCR, proposal linking, and complete-filing recovery remain outside this workflow.
+
+Keep source documents, labels, weights, and generated output outside ordinary commits.
+Only explicitly accepted labels become training examples.
+Use one external folder per future run.
+Public release requires separate approval under the [release guide](docs/release.md).
+Read the [model card](MODEL_CARD.md), [data notice](DATA_NOTICE.md), and [security policy](SECURITY.md) before distribution.

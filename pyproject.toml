@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "proxybench"
 version = "0.1.0"
-description = "Historical SEC N-PX extraction experiments and evaluation."
+description = "Historical SEC N-PX fragment extraction, training, and evaluation."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []

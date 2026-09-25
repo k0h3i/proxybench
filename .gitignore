@@ -1,7 +1,7 @@
-# Windows download metadata attached to project notes.
-/notes/**/*:Zone.Identifier
+# Windows download metadata.
+*:Zone.Identifier
 
-# Local datasets and experiment output. Keep their usage guides.
+# Local datasets and retained models. Keep their usage guides.
 /data/*
 !/data/README.md
 /artifacts/*

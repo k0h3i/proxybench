@@ -1,13 +1,12 @@
 # Local data
 
-This directory stores local project data. Git ignores all contents except this guide. Downloaded filings and reviewed labels remain local until a separate dataset release decision.
+Keep complete original sources in the flat `raw/` directory.
+Keep their locations, names, and hashes in `source-manifest.json`.
+The `training-dataset/` directory contains `training-examples.jsonl`, `development-examples.jsonl`, and `dataset-manifest.json`.
+The manifest binds exact messages to source selections, label rules, and the existing split.
 
-Use these subdirectories:
-
-- `raw/`: Original filing documents, preserved without edits.
-- `normalized/`: Prepared text, tables, and source mappings.
-- `packets/`: Model inputs and source-first review material.
-- `annotations/`: Labels, source audits, and review history.
-- `manifests/`: Source inventories, hashes, and sampling decisions.
-
-Keep original submissions and amendments separate. Preserve retrieval failures alongside successful downloads in the source inventory. Treat initial calibration examples as development data.
+These files remain ignored by Git.
+This usage guide is the tracked exception.
+Follow the [dataset guide](../docs/dataset.md) for preparation and explicit acceptance.
+Follow the [release guide](../docs/release.md) before selecting public raw files.
+A raw-source release does not authorize publishing accepted labels.

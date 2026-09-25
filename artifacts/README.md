@@ -1,11 +1,12 @@
-# Local experiment output
+# Retained models
 
-This directory stores generated experiment output. Git ignores all contents except this guide. Small shareable results can be selected for public documentation later.
+Keep only selected final models under `models/`.
+Each model folder contains its adapter, final inference GGUF, and portable `model-info.json`.
+The working model folder is `models/ProxyType-4B/`.
+Do not store run history, generated reports, environments, base caches, or merged conversion intermediates here.
 
-Use these subdirectories:
-
-- `runs/`: Raw model output, recorded prompts, and run metadata.
-- `models/`: Downloaded weights and trained adapters.
-- `reports/`: Generated evaluation and calibration reports.
-
-Retain raw predictions before common normalization. Record system-specific repairs with their run settings. Keep output separate from source documents and reference labels.
+Use an external workspace for each future run.
+Keep temporary model rollback copies only until the bounded loading tests pass.
+Do not delete the last working originals before that gate.
+Model files remain ignored by Git, with this guide as the tracked exception.
+See the [inference guide](../docs/inference.md) and [release guide](../docs/release.md).
