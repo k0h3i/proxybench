@@ -4,7 +4,7 @@ Training uses the private dataset and [portable recipe](../configs/training.json
 The base model is `Qwen/Qwen3.5-4B`, revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`.
 Complete the [preparation guide](preparation.md) before model execution.
 It covers Python packages, the compiler, llama.cpp, native libraries, base weights, and private inputs.
-Export and evaluation of a new adapter also require the pending converter change in the [cleanup plan](environment-cleanup-plan.md).
+Export and evaluation of a new adapter also require the authenticated converter installation in the [preparation guide](preparation.md#obtain-converter-source-for-export).
 The user starts GPU commands.
 
 ## Recipe and inputs
@@ -115,7 +115,7 @@ Before the test, make old run directories, base-model directories, and artifact 
 Use only `.venv/`, the independent native runtime, and the external base cache for this test.
 If either load fails, keep the protected originals and fix the supported path.
 
-For future export, first complete the [converter preparation](preparation.md#obtain-converter-source-for-export), including its pending implementation change.
+For future export, first complete the [converter preparation](preparation.md#obtain-converter-source-for-export).
 Then run export with the prepared variables:
 
 ```bash

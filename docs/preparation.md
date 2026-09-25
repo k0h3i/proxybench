@@ -24,7 +24,7 @@ Other platforms need a separately tested installation procedure.
 | CUDA 12 runtime and cuBLAS libraries | The pinned llama.cpp build | [requirements-llama-cuda.txt](../configs/requirements-llama-cuda.txt), installed separately below |
 | OpenMP, OpenSSL, and C++ runtime libraries | Native llama.cpp loading | Ubuntu `libgomp1`, `libssl-dev`, and `build-essential` |
 | Pinned base weights | Training, adapter loading, and export | Hugging Face download below |
-| Pinned converter source | Export and evaluation of a new adapter | Source archive below and the pending converter change |
+| Pinned converter source | Export and evaluation of a new adapter | Authenticated source archive below |
 | Selected adapter, tokenizer, and GGUF | Existing ProxyType-4B loading and inference | Private retained model files |
 | Accepted dataset and original sources | Training, evaluation, and source reconstruction | Private retained data or the [dataset workflow](dataset.md) |
 
@@ -248,14 +248,33 @@ with tarfile.open(archive) as bundle:
     bundle.extractall(stage, filter='data')
 source = stage / 'llama.cpp-b10909-mix-bea84f7'
 shutil.copytree(source, os.environ['PROXYBENCH_CONVERTER_SOURCE'])
+shutil.copy2(archive, Path(os.environ['PROXYBENCH_CONVERTER_SOURCE']) / '.proxybench-source.tar.gz')
 PY
 ```
 
-Export remains blocked until the [preparation implementation plan](environment-cleanup-plan.md#stage-1-complete-preparation) replaces the converter's Git-only source test.
-That change must bind the extracted files to the accepted archive and reject modified source.
-Do not replace the revision or bypass source identity tests.
-Training followed by conversion and evaluation requires that change before launch.
+The converter authenticates `.proxybench-source.tar.gz` against the pinned checksum before execution.
+It compares every extracted file and directory with the authenticated archive.
+It rejects changed, missing, and added files, symbolic links, and converter imports from other locations.
+Keep the archive inside the source installation.
+The converter disables Python bytecode files to preserve the exact inventory.
 Existing GGUF inference and the adapter/GGUF load test do not use converter source.
+
+Test the source identity and converter help with CUDA disabled:
+
+```bash
+CUDA_VISIBLE_DEVICES='' PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import sys
+from proxybench.training.conversion import validate_converter_source
+source = Path(os.environ['PROXYBENCH_CONVERTER_SOURCE']).resolve()
+identity = validate_converter_source(source)
+environment = dict(os.environ, PYTHONPATH=os.pathsep.join((str(source), str(source / 'gguf-py'))))
+subprocess.run([sys.executable, str(source / 'convert_hf_to_gguf.py'), '--help'], env=environment, check=True)
+print(identity['source_commit'], identity['archive_sha256'])
+PY
+```
 
 ## Complete CPU acceptance
 

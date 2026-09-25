@@ -17,7 +17,7 @@ Its separate CUDA libraries use [requirements-llama-cuda.txt](configs/requiremen
 The guide also covers OpenMP, OpenSSL, the base weights, and converter source.
 
 The private model weights and accepted dataset are separate inputs.
-Export needs the converter source identity change recorded in the [preparation plan](docs/environment-cleanup-plan.md).
+Export authenticates the pinned source archive and its complete extracted files under the [preparation procedure](docs/preparation.md#obtain-converter-source-for-export).
 Complete preparation before the user starts GPU work.
 The CPU source-preparation package supports Python 3.11 or later without model dependencies.
 

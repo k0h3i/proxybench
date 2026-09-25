@@ -6,6 +6,49 @@ from proxybench.execution.resources import durable_json
 from proxybench.training.runtime import load_base, attach_adapter, phase
 from proxybench.training.adapters import require_same_adapter, digest
 
+
+def require_project_environment(training, inference):
+    """Reject disposable dependencies before either model worker starts."""
+    import os
+    import shlex
+    import shutil
+    import sys
+
+    root = Path.cwd().resolve()
+    artifacts = root / 'artifacts'
+
+    def require_independent(value):
+        if value and Path(value).expanduser().resolve().is_relative_to(artifacts):
+            raise ValueError('Model validation cannot use old artifact dependencies')
+
+    for value in (sys.prefix, sys.base_prefix, sys.executable):
+        require_independent(value)
+    if Path(sys.prefix).resolve() != (root / '.venv').resolve():
+        raise ValueError('Model validation requires the project .venv Python environment')
+    for value in sys.path:
+        require_independent(value)
+    for name in ('PATH', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'LIBRARY_PATH', 'CPATH',
+                 'C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH'):
+        for value in os.environ.get(name, '').split(os.pathsep):
+            require_independent(value)
+    for name in ('CC', 'CXX'):
+        for value in shlex.split(os.environ.get(name, '')):
+            require_independent(value)
+            resolved = shutil.which(value)
+            if resolved:
+                require_independent(resolved)
+    for name in ('PROXYBENCH_BASE_CACHE', 'PROXYBENCH_RUNTIME', 'PROXYBENCH_CUDA_LIB',
+                 'PROXYBENCH_CONVERTER_SOURCE', 'CUDA_HOME', 'CUDA_PATH'):
+        require_independent(os.environ.get(name, ''))
+    for value in (training.get('base_cache'), training.get('converter_source'),
+                  inference.get('server'), inference.get('runtime_manifest')):
+        require_independent(value)
+    for value in inference.get('library_path', '').split(os.pathsep):
+        require_independent(value)
+    for value in inference.get('external_libraries', {}):
+        require_independent(value)
+
+
 def synthetic_fragments(directory):
     from proxybench.annotation.historical import prepare_historical
     import hashlib
@@ -63,18 +106,11 @@ def validate_adapter(adapter, output, config):
 def validate_runtime(args):
     from proxybench.extraction.runtime import load_config, source_messages, supervised_generate_answers
     from proxybench.training.runtime import launch
-    import os
-    import sys
-    artifacts = Path('artifacts').resolve()
-    if Path(sys.prefix).resolve().is_relative_to(artifacts):
-        raise ValueError('Model validation requires the external Python environment')
-    for name in ('CC', 'CXX', 'LD_LIBRARY_PATH', 'PROXYBENCH_BASE_CACHE'):
-        if str(artifacts/'environments') in os.environ.get(name, '') or str(artifacts/'runs') in os.environ.get(name, ''):
-            raise ValueError('Model validation cannot use old experiment dependencies')
-    output = Path(args.run_dir)
-    output.mkdir(parents=True, exist_ok=False)
     training = load_config(args.training_config)
     inference = load_config(args.config)
+    require_project_environment(training, inference)
+    output = Path(args.run_dir)
+    output.mkdir(parents=True, exist_ok=False)
     inference['limits'] = {**inference['limits'], 'phase_seconds': 600, 'total_seconds': 600}
     # No training updates, merge, or conversion occur in this validation.
     training['limits'] = {**training['limits'], 'phase_seconds': 900, 'total_seconds': 900}
