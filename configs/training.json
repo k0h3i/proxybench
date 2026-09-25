@@ -30,8 +30,9 @@
   "schema_version": "training-recipe-v1",
   "dataset": "data/training-dataset",
   "system_prompt": "configs/model-system-prompt.txt",
-  "base_cache": "${PROXYBENCH_BASE_CACHE}",
   "converter_source": "${PROXYBENCH_CONVERTER_SOURCE}",
   "export_seconds": 1800,
-  "inference_config": "configs/inference.json"
+  "inference_config": "configs/inference.json",
+  "base_path": "artifacts/models/Qwen3.5-4B",
+  "base_manifest": "configs/base-model.json"
 }

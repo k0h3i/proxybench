@@ -32,8 +32,8 @@ Python packages do not install the NVIDIA driver or the llama.cpp executable.
 The Torch packages supply CUDA 13 libraries for Python.
 The separate CUDA 12 installation supplies libraries for llama.cpp.
 
-Reserve space for Python packages, downloads, the base cache, and model files.
-The base weights and final GGUF each occupy about 7.9 GiB.
+Reserve space for Python packages, downloads, the retained base, and model files.
+The full base checkpoint occupies about 8.7 GiB, and the final GGUF occupies about 7.9 GiB.
 Training and conversion also require at least 64 GiB free on the run filesystem.
 The resource limits can reject work when available host or GPU memory is too low.
 
@@ -181,25 +181,31 @@ Set these variables in each shell used for model commands:
 ```bash
 export PROXYBENCH_RUNTIME="$HOME/.local/share/proxybench/runtime/llama-329b6160"
 export PROXYBENCH_CUDA_LIB="$PROXYBENCH_RUNTIME"
-export PROXYBENCH_BASE_CACHE="$HOME/.cache/proxybench/base-models"
 export PROXYBENCH_CONVERTER_SOURCE="$HOME/.local/share/proxybench/converter/llama-329b6160"
 ```
 
 If you chose another runtime directory, use that path here.
-Keep the base cache outside the repository.
-Download the pinned base revision without loading it:
+Keep one pinned BF16 base under `artifacts/models/Qwen3.5-4B/`.
+Adapter loading and base-model comparisons share this copy.
+Download and inspect the pinned revision without loading it:
 
 ```bash
 .venv/bin/python - <<'PY'
-import os
 from huggingface_hub import snapshot_download
+from proxybench.extraction.runtime import load_config
+from proxybench.training.runtime import base_snapshot
 arguments = dict(repo_id='Qwen/Qwen3.5-4B',
                  revision='851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a',
-                 cache_dir=os.environ['PROXYBENCH_BASE_CACHE'])
+                 local_dir='artifacts/models/Qwen3.5-4B')
 print(snapshot_download(**arguments))
-print(snapshot_download(**arguments, local_files_only=True))
+print(base_snapshot(load_config('configs/training.json')))
 PY
 ```
+
+The loader authenticates [base-model.json](../configs/base-model.json) and compares every required local file with its pinned hash.
+Model execution uses the retained files without a separate download cache.
+The original checkpoint contains BF16 weights and a small set of FP32 parameters.
+Keep those original dtypes unchanged.
 
 A Git clone contains no private model weights or accepted labels.
 Obtain the retained files from the project's authorized private copy.

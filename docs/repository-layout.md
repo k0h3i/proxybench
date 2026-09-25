@@ -4,7 +4,7 @@ ProxyBench keeps reusable Python code under `src/proxybench/`.
 `python -m proxybench` provides the supported command interface.
 The package requires Python 3.11 or later and has no mandatory runtime dependencies.
 Project Python packages live in the `.venv/` at the repository root.
-Native runtimes, base-model caches, and run folders remain separate.
+Native runtimes and run folders remain separate.
 Follow the [preparation guide](preparation.md) for their installation.
 
 | Area | Responsibility |
@@ -26,6 +26,9 @@ Their manifests preserve source identity, labels, and split restrictions.
 
 Keep selected models under `artifacts/models/ProxyType-4B/`.
 The folder contains `adapter/`, `model-bf16.gguf`, and `model-info.json`.
+Keep the pinned BF16 base under `artifacts/models/Qwen3.5-4B/`.
+Adapter loading and base-model comparisons share that copy.
+[base-model.json](../configs/base-model.json) records its exact revision and file hashes.
 Data and model contents stay ignored, with their usage guides as tracked exceptions.
 Private Git history stays unchanged during cleanup.
 

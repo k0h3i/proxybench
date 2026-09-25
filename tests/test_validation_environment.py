@@ -19,7 +19,8 @@ class ValidationEnvironmentTests(unittest.TestCase):
         stack.enter_context(patch('sys.prefix', str(self.root / '.venv')))
         stack.enter_context(patch('sys.base_prefix', str(self.root / 'python')))
         stack.enter_context(patch('sys.executable', str(self.root / '.venv/bin/python')))
-        self.training = {'base_cache': str(self.root / 'base-cache')}
+        self.training = {'base_path': str(self.root / 'artifacts/models/Qwen3.5-4B'),
+                         'base_manifest': str(self.root / 'configs/base-model.json')}
         self.inference = {'model': str(self.root / 'artifacts/models/ProxyType-4B/model.gguf'),
                           'tokenizer': str(self.root / 'artifacts/models/ProxyType-4B/adapter'),
                           'library_path': str(self.root / 'runtime')}
@@ -42,7 +43,7 @@ class ValidationEnvironmentTests(unittest.TestCase):
     def test_old_dependencies_in_environment_are_rejected(self):
         for name in ('PATH', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'LIBRARY_PATH', 'CPATH',
                      'C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH', 'CC', 'CXX',
-                     'PROXYBENCH_BASE_CACHE', 'PROXYBENCH_RUNTIME', 'PROXYBENCH_CUDA_LIB',
+                     'PROXYBENCH_RUNTIME', 'PROXYBENCH_CUDA_LIB',
                      'PROXYBENCH_CONVERTER_SOURCE', 'CUDA_HOME', 'CUDA_PATH'):
             with self.subTest(name=name), patch.dict('os.environ', {name: str(self.root / 'artifacts/environments/old')}):
                 with self.assertRaisesRegex(ValueError, 'artifact dependencies'):
@@ -70,7 +71,7 @@ class ValidationEnvironmentTests(unittest.TestCase):
                 self.check_environment()
 
     def test_resolved_configuration_cannot_use_old_dependencies(self):
-        for configuration, name in ((self.training, 'base_cache'), (self.training, 'converter_source'),
+        for configuration, name in ((self.training, 'base_manifest'), (self.training, 'converter_source'),
                                     (self.inference, 'server'), (self.inference, 'runtime_manifest'),
                                     (self.inference, 'library_path')):
             with self.subTest(name=name), patch.dict(configuration, {name: str(self.root / 'artifacts/runs/old')}):
@@ -90,3 +91,23 @@ class ValidationEnvironmentTests(unittest.TestCase):
                 validate_runtime(args)
             launch.assert_not_called()
             self.assertFalse(args.run_dir.exists())
+
+
+    def test_base_directory_rejects_old_artifacts_and_symlinked_paths(self):
+        from proxybench.training.runtime import base_model_path
+        for path in ('artifacts/environments/old', 'artifacts/runs/old', 'artifacts/models/other'):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'retained Qwen3.5-4B'):
+                base_model_path({'base_path': str(self.root / path)})
+        old = self.root / 'artifacts/runs/old'
+        old.mkdir(parents=True)
+        base = Path(self.training['base_path'])
+        base.parent.mkdir()
+        base.symlink_to(old, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'symbolic links'):
+            self.check_environment()
+        base.unlink()
+        source = self.root / 'converter'
+        source.symlink_to(old, target_is_directory=True)
+        with patch.dict(self.training, {'converter_source': str(source)}):
+            with self.assertRaisesRegex(ValueError, 'symbolic links'):
+                self.check_environment()

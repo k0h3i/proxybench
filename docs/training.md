@@ -97,11 +97,10 @@ Environment preparation does not change the source-labeling purpose of `.venv/bi
 ## Bounded user-launched load command
 
 Run this command only after preparation passes.
-Use a new run folder and the prepared runtime and cache locations.
+Use a new run folder and the prepared runtime and retained model locations.
 The user starts this GPU work.
 
 ```bash
-export PROXYBENCH_BASE_CACHE="$HOME/.cache/proxybench/base-models"
 export PROXYBENCH_RUNTIME="$HOME/.local/share/proxybench/runtime/llama-329b6160"
 export PROXYBENCH_CUDA_LIB="$PROXYBENCH_RUNTIME"
 .venv/bin/python -m proxybench validate-runtime --run-dir ../proxybench-runs/model-load-001
@@ -110,8 +109,8 @@ export PROXYBENCH_CUDA_LIB="$PROXYBENCH_RUNTIME"
 The command loads the pinned adapter and final GGUF and requests one synthetic text and one synthetic HTML-context answer from each.
 It performs no training updates.
 The adapter phase allows at most 900 seconds, and the GGUF phase allows at most 600 seconds.
-Before the test, make old run directories, base-model directories, and artifact environments unavailable through a reversible move.
-Use only `.venv/`, the independent native runtime, and the external base cache for this test.
+Before the test, make old run directories and artifact environments unavailable through a reversible move.
+Use `.venv/`, the independent native runtime, and the retained base in `artifacts/models/Qwen3.5-4B/`.
 If either load fails, keep the protected originals and fix the supported path.
 
 For future export, first complete the [converter preparation](preparation.md#obtain-converter-source-for-export).

@@ -15,6 +15,7 @@ from proxybench.training.preparation import prepare_sequences
 
 BASE_MODEL = 'Qwen/Qwen3.5-4B'
 BASE_REVISION = '851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a'
+BASE_MANIFEST_SHA256 = '199f252959418e8e7c006b14c7280db752d1e8b10b3428571bb10f9b28407641'
 
 
 def binding(value):
@@ -48,16 +49,61 @@ def stopping():
     return bool(os.environ.get('PROXYBENCH_STOP_FILE') and Path(os.environ['PROXYBENCH_STOP_FILE']).exists())
 
 
+def require_plain_path(value):
+    """Reject paths that depend on symbolic links or parent traversal."""
+    path = Path(value).expanduser().absolute()
+    if '..' in path.parts or any(part.is_symlink() for part in (path, *path.parents)):
+        raise ValueError('Model paths cannot contain parent traversal or symbolic links')
+    return path
+
+
+def base_model_path(config):
+    root = require_plain_path(config['base_path'])
+    artifacts = Path.cwd().resolve() / 'artifacts'
+    if root.is_relative_to(artifacts) and root != artifacts / 'models/Qwen3.5-4B':
+        raise ValueError('Use the retained Qwen3.5-4B base model directory')
+    return root
+
+
 def base_snapshot(config):
-    """Resolve an immutable revision instead of trusting adapter metadata."""
+    """Authenticate the complete local base snapshot without network access."""
+    from proxybench.training.labels import read_json
     if config['model_id'] != BASE_MODEL or config['model_revision'] != BASE_REVISION:
         raise ValueError('Unsupported base model or revision')
-    cache = Path(config['base_cache']).expanduser().resolve()
-    if '$' in str(cache) or cache.is_relative_to(Path.cwd().resolve()):
-        raise ValueError('Set PROXYBENCH_BASE_CACHE to an external model cache')
-    from huggingface_hub import snapshot_download
-    return snapshot_download(repo_id=BASE_MODEL, revision=BASE_REVISION, cache_dir=str(cache),
-                             local_files_only=config.get('offline', False))
+    root = base_model_path(config)
+    manifest_path = require_plain_path(config['base_manifest'])
+    raw = manifest_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != BASE_MANIFEST_SHA256:
+        raise ValueError('Base model manifest differs from its pinned identity')
+    manifest = read_json(raw)
+    if (manifest.get('model_id') != BASE_MODEL or manifest.get('model_revision') != BASE_REVISION
+            or not isinstance(manifest.get('files'), dict) or not manifest['files']):
+        raise ValueError('Unsupported base model manifest')
+    expected = manifest['files']
+    for name, expected_hash in expected.items():
+        relative = Path(name)
+        if (not relative.parts or relative.is_absolute() or '..' in relative.parts
+                or relative.as_posix() != name or relative.parts[0] == '.cache'
+                or not isinstance(expected_hash, str) or not re.fullmatch('[0-9a-f]{64}', expected_hash)):
+            raise ValueError('Invalid base model manifest file')
+        path = require_plain_path(root / relative)
+        if not path.is_relative_to(root) or not path.is_file():
+            raise ValueError('Base model snapshot has a missing or escaped file')
+        if digest(path) != expected_hash:
+            raise ValueError('Base model file differs from its pinned hash')
+    metadata = {'.cache/huggingface/.gitignore', '.cache/huggingface/CACHEDIR.TAG',
+                f'.cache/huggingface/trees/{BASE_REVISION}.json'}
+    metadata.update(f'.cache/huggingface/download/{name}{suffix}'
+                    for name in expected for suffix in ('.metadata', '.lock'))
+    allowed = expected.keys() | metadata
+    for path in root.rglob('*'):
+        if path.is_symlink():
+            raise ValueError('Base model snapshot cannot contain symbolic links')
+        if path.is_dir():
+            continue
+        if not path.is_file() or path.relative_to(root).as_posix() not in allowed:
+            raise ValueError('Base model snapshot contains an unexpected file')
+    return str(root)
 
 
 def load_base(config, snapshot=None):

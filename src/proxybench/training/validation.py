@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from proxybench.execution.resources import durable_json
-from proxybench.training.runtime import load_base, attach_adapter, phase
+from proxybench.training.runtime import load_base, attach_adapter, phase, base_model_path, require_plain_path
 from proxybench.training.adapters import require_same_adapter, digest
 
 
@@ -37,10 +37,16 @@ def require_project_environment(training, inference):
             resolved = shutil.which(value)
             if resolved:
                 require_independent(resolved)
-    for name in ('PROXYBENCH_BASE_CACHE', 'PROXYBENCH_RUNTIME', 'PROXYBENCH_CUDA_LIB',
+    for name in ('PROXYBENCH_RUNTIME', 'PROXYBENCH_CUDA_LIB',
                  'PROXYBENCH_CONVERTER_SOURCE', 'CUDA_HOME', 'CUDA_PATH'):
         require_independent(os.environ.get(name, ''))
-    for value in (training.get('base_cache'), training.get('converter_source'),
+    if training.get('base_path'):
+        base_model_path(training)
+    if training.get('base_manifest'):
+        require_independent(require_plain_path(training['base_manifest']))
+    if training.get('converter_source'):
+        require_plain_path(training['converter_source'])
+    for value in (training.get('converter_source'),
                   inference.get('server'), inference.get('runtime_manifest')):
         require_independent(value)
     for value in inference.get('library_path', '').split(os.pathsep):

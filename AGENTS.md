@@ -47,9 +47,11 @@ A citation alone does not establish semantic support.
 Place reusable code under `src/proxybench/` and small synthetic tests under `tests/`.
 Keep shared guides under `docs/` and portable configuration under `configs/`.
 Keep local sources and labels under ignored `data/`.
-Keep only selected models under ignored `artifacts/models/`.
+Keep selected models and the pinned Qwen3.5-4B base under ignored `artifacts/models/`.
 Keep project Python packages in the root `.venv/`.
-Use external run folders, native runtimes, and base-model caches.
+Use external run folders and native runtimes.
+Share `artifacts/models/Qwen3.5-4B/` between adapter loading and base-model comparisons.
+Do not retain a duplicate base-model cache.
 Do not retain experiment archives or old compatibility workflows.
 
 Keep credentials, personal email, workstation paths, and local agent state out of shared files.

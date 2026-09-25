@@ -35,20 +35,6 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 prompt_tokens(tokenizer, messages, config)
 
-    def test_base_resolves_exact_revision_and_external_cache(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            calls = []
-            fake = SimpleNamespace(snapshot_download=lambda **kwargs: calls.append(kwargs) or '/snapshot')
-            config = dict(model_id=BASE_MODEL, model_revision=BASE_REVISION, base_cache=tmp)
-            with patch.dict(sys.modules, huggingface_hub=fake):
-                self.assertEqual(base_snapshot(config), '/snapshot')
-                self.assertEqual(calls[0]['revision'], BASE_REVISION)
-                self.assertEqual(calls[0]['repo_id'], BASE_MODEL)
-                with self.assertRaises(ValueError):
-                    base_snapshot({**config, 'model_revision': 'main'})
-                with self.assertRaises(ValueError):
-                    base_snapshot({**config, 'base_cache': 'artifacts/base'})
-
     def test_runtime_manifest_rejects_escape_and_tampering(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); binary=root/'llama-server'; binary.write_bytes(b'fake')
@@ -135,3 +121,104 @@ class AccountingTests(unittest.TestCase):
                  patch('proxybench.training.conversion.subprocess.check_output',side_effect=AssertionError('converter check')):
                 self.assertEqual(convert(model,output,{}),target)
             self.assertEqual(json.loads((output/'complete.json').read_text()),result)
+
+
+class LocalBaseSnapshotTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.base = self.root / 'base'
+        self.base.mkdir()
+        (self.base / 'config.json').write_text('{}')
+        (self.base / 'model.safetensors').write_bytes(b'synthetic BF16 weights')
+        self.manifest = self.root / 'base-model.json'
+        self.identity = dict(model_id=BASE_MODEL, model_revision=BASE_REVISION,
+                             files={path.name: digest(path) for path in self.base.iterdir()})
+        self.config = dict(model_id=BASE_MODEL, model_revision=BASE_REVISION,
+                           base_path=str(self.base), base_manifest=str(self.manifest))
+        self.pin_manifest()
+
+    def pin_manifest(self):
+        self.manifest.write_text(json.dumps(self.identity))
+        patcher = patch('proxybench.training.runtime.BASE_MANIFEST_SHA256', digest(self.manifest))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_complete_local_snapshot_needs_no_network_or_model_packages(self):
+        with patch.dict(sys.modules, huggingface_hub=None, unsloth=None):
+            self.assertEqual(base_snapshot(self.config), str(self.base))
+        metadata = self.base / '.cache/huggingface/download'
+        metadata.mkdir(parents=True)
+        (metadata / 'config.json.metadata').write_text('download metadata')
+        (metadata / 'config.json.lock').touch()
+        (metadata.parent / '.gitignore').write_text('*')
+        (metadata.parent / 'CACHEDIR.TAG').write_text('Signature: 8a477f597d28d172789f06886806bc55')
+        trees = metadata.parent / 'trees'
+        trees.mkdir()
+        (trees / (BASE_REVISION + '.json')).write_text('{}')
+        self.assertEqual(base_snapshot(self.config), str(self.base))
+
+    def test_wrong_revision_manifest_identity_and_model_are_rejected(self):
+        for key, value in (('model_revision', 'main'), ('model_id', 'other')):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                base_snapshot({**self.config, key: value})
+        self.manifest.write_text(self.manifest.read_text() + ' ')
+        with self.assertRaisesRegex(ValueError, 'pinned identity'):
+            base_snapshot(self.config)
+        for key in ('model_id', 'model_revision'):
+            original = self.identity[key]
+            self.identity[key] = 'other'
+            self.pin_manifest()
+            with self.assertRaisesRegex(ValueError, 'Unsupported base model manifest'):
+                base_snapshot(self.config)
+            self.identity[key] = original
+
+    def test_missing_changed_and_unexpected_files_are_rejected(self):
+        model = self.base / 'model.safetensors'
+        original = model.read_bytes()
+        model.write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'pinned hash'):
+            base_snapshot(self.config)
+        model.unlink()
+        with self.assertRaisesRegex(ValueError, 'missing'):
+            base_snapshot(self.config)
+        model.write_bytes(original)
+        for name in ('injected.py', '.cache/evil.py', '.cache/huggingface/evil.py'):
+            added = self.base / name
+            added.parent.mkdir(parents=True, exist_ok=True)
+            added.write_text('unexpected')
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'unexpected file'):
+                base_snapshot(self.config)
+            added.unlink()
+
+    def test_manifest_paths_cannot_escape_or_alias(self):
+        for name in ('', '.', '../outside', '/outside', 'x/../config.json', './config.json', '.cache/x'):
+            self.identity['files'] = {name: '0' * 64}
+            self.pin_manifest()
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'manifest file'):
+                base_snapshot(self.config)
+
+    def test_file_directory_root_and_manifest_symlinks_are_rejected(self):
+        original = self.base / 'model.safetensors'
+        outside = self.root / 'weights'
+        original.rename(outside)
+        original.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'symbolic links'):
+            base_snapshot(self.config)
+        original.unlink()
+        outside.rename(original)
+        directory = self.base / 'extra'
+        directory.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'symbolic links'):
+            base_snapshot(self.config)
+        directory.unlink()
+        for key, target in (('base_path', self.base), ('base_manifest', self.manifest)):
+            link = self.root / ('link-' + key)
+            link.symlink_to(target, target_is_directory=target.is_dir())
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'symbolic links'):
+                base_snapshot({**self.config, key: str(link)})
+        alias = self.root / 'alias'
+        alias.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'symbolic links'):
+            base_snapshot({**self.config, 'base_path': str(alias / 'base')})

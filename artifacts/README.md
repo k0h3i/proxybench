@@ -1,8 +1,11 @@
 # Retained models
 
-Keep only selected final models under `models/`.
-Each model folder contains its adapter, final inference GGUF, and portable `model-info.json`.
+Keep selected final models and the pinned base under `models/`.
 The working model folder is `models/ProxyType-4B/`.
+It contains the adapter, final inference GGUF, and portable `model-info.json`.
+Keep the original BF16 Qwen3.5-4B checkpoint under `models/Qwen3.5-4B/`.
+Adapter loading and base-model comparisons share that copy.
+The loader compares its files with [base-model.json](../configs/base-model.json) before use.
 Do not store run history, generated reports, environments, base caches, or merged conversion intermediates here.
 
 Use an external workspace for each future run.

@@ -27,7 +27,7 @@ flowchart LR
 
 | Form | Required files and tradeoffs |
 |---|---|
-| Separate adapter | About 82 MiB with tokenizer files, plus the matching external base weights. The adapter can be replaced independently. |
+| Separate adapter | About 82 MiB with tokenizer files, plus the matching base weights in `artifacts/models/Qwen3.5-4B/`. The adapter can be replaced independently. |
 | Temporary merged model | About 7.9 GiB of base weights with adapter changes applied. Conversion needs temporary disk space and a compatible Python environment. |
 | Final GGUF | About 7.9 GiB with its tokenizer information. The supported llama.cpp path needs no separate base weights or adapter loading. |
 
@@ -51,7 +51,7 @@ Python package installation alone does not install llama.cpp.
 [configs/inference.json](../configs/inference.json) records the engine controls and runtime variables.
 The pinned engine revision is `329b6160f513915f1c607dbfae3d5ce864a64a4f`, release `b10909-mix-bea84f7`.
 A replacement build requires bounded loading and inference tests.
-Keep installed environments and model caches outside run folders.
+Keep installed environments and retained models outside run folders.
 
 ## Inputs and answers
 
@@ -72,6 +72,7 @@ Inference binds its server to `127.0.0.1` and stops its owned process after work
 Keep process, memory, and input limits enabled.
 
 For separate adapter loading and temporary conversion, use `.venv/bin/python -m proxybench export --help`.
-The loader fetches the declared base revision and applies the local Safetensors adapter.
+The loader compares the retained base files with their pinned hashes and applies the local Safetensors adapter.
+It does not download weights during model execution.
 The adapter configuration alone is not proof that the correct revision loaded.
 Use the bounded acceptance tests in the [training guide](training.md) before deleting working originals.
