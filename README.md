@@ -10,12 +10,13 @@ The project does not recover every record from a complete filing.
 
 Linux and WSL are supported with Python 3.11 or later.
 The CPU package has no runtime dependencies.
-Install optional model libraries in an external environment before model execution.
+Use a `.venv/` at the repository root for Python packages.
+Complete the [preparation stage](docs/training.md#preparation-stage-before-gpu-work), including model dependencies, before model execution.
 The user starts GPU work through the commands in the [training guide](docs/training.md).
 
 ```bash
-python3 -m venv ../proxybench-env
-source ../proxybench-env/bin/activate
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 python -m proxybench --help
 PYTHONPATH=src python3 -m unittest discover -s tests -v

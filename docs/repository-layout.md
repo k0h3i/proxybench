@@ -3,7 +3,8 @@
 ProxyBench keeps reusable Python code under `src/proxybench/`.
 `python -m proxybench` provides the supported command interface.
 The package requires Python 3.11 or later and has no mandatory runtime dependencies.
-Optional model environments remain external.
+Project Python packages live in the `.venv/` at the repository root.
+Native runtimes, base-model caches, and run folders remain separate.
 
 | Area | Responsibility |
 |---|---|

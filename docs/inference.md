@@ -5,6 +5,7 @@ The supported task takes one marked voting target with its source context.
 Prepare the fragment through the [dataset workflow](dataset.md).
 The model returns the fourteen-field [label contract](label-contract.md).
 It does not select every target in a complete filing.
+Complete the [preparation stage](training.md#preparation-stage-before-gpu-work) in the root `.venv/` before the user launches GPU work.
 
 ## Model formats
 
@@ -51,7 +52,7 @@ It does not depend on a Torch library inside a deleted experiment environment.
 ```bash
 export PROXYBENCH_RUNTIME="$HOME/.local/share/proxybench/runtime/llama-329b6160"
 export PROXYBENCH_CUDA_LIB="/usr/local/lib/ollama/cuda_v12"
-python -m proxybench infer --help
+.venv/bin/python -m proxybench infer --help
 ```
 
 [configs/inference.json](../configs/inference.json) records the engine controls and runtime variables.
@@ -68,7 +69,7 @@ Preserve the generation prefix, tokenizer template, response parameters, and tok
 The server must not substitute another chat template.
 
 ```bash
-python -m proxybench infer --model artifacts/models/ProxyType-4B/model-bf16.gguf --input fragment.txt --config configs/inference.json --run-dir ../proxybench-runs/inference-001
+.venv/bin/python -m proxybench infer --model artifacts/models/ProxyType-4B/model-bf16.gguf --input fragment.txt --config configs/inference.json --run-dir ../proxybench-runs/inference-001
 ```
 
 The command saves the raw answer before parsing or normalization.
@@ -77,7 +78,7 @@ Do not silently repair malformed answers or infer unsupported values.
 Inference binds its server to `127.0.0.1` and stops its owned process after work.
 Keep process, memory, and input limits enabled.
 
-For separate adapter loading and temporary conversion, use `python -m proxybench export --help`.
+For separate adapter loading and temporary conversion, use `.venv/bin/python -m proxybench export --help`.
 The loader fetches the declared base revision and applies the local Safetensors adapter.
 The adapter configuration alone is not proof that the correct revision loaded.
 Use the bounded acceptance tests in the [training guide](training.md) before deleting working originals.

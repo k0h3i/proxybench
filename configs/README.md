@@ -5,7 +5,8 @@
 `model-system-prompt.txt` contains the exact canonical prompt bytes.
 The requirement files pin the optional environments used by retained commands.
 
-Keep environments, runtime binaries, base caches, and future runs outside the repository.
+Keep project Python packages in the root `.venv/`.
+Keep runtime binaries, base caches, and future runs outside the repository.
 Supply private SEC contact identity through runtime arguments or environment variables.
 Do not add personal email, credentials, or workstation paths to tracked configuration.
 Read the [training guide](../docs/training.md) and [inference guide](../docs/inference.md).
