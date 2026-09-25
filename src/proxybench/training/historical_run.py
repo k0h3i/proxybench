@@ -10,6 +10,8 @@ import sys
 import time
 
 from proxybench.evaluation.pilot_review import accept_decisions, create_review, finish_report, require_decisions, source_text
+from proxybench.evaluation.system_admission import SCORER, admit_evaluation, validate_evaluation
+from proxybench.evaluation.system_labels import source_cells
 from proxybench.execution.live import supervise
 from proxybench.execution.resources import durable_json, ledger_entries
 from proxybench.training.historical import (
@@ -29,11 +31,15 @@ def create_final_review(root, state, prepared):
     cases = []
     for index, meta in enumerate(metadata):
         key = meta['packet']['manifest']['packet_id']
-        cases.append(dict(id=key, source=source_text(meta),
+        case = dict(id=key, source=source_text(meta),
                           reference=read_json(prepared['rows']['development'][index]['messages'][-1]['content']),
                           answers={model: str(Path(state['completed_phases'][phase]['output'])/f'answer-{index}.json')
-                                   for model, phase in [('original', 'baseline'), ('trained', 'final')]}))
-    review = create_review(root/'review-final', cases, identity=state['identity'], kind='evaluation')
+                                   for model, phase in [('original', 'baseline'), ('trained', 'final')]})
+        if (root/'evaluation-admission.json').exists():
+            case['source_cells'] = source_cells(meta)
+        cases.append(case)
+    review = create_review(root/'review-final', cases, identity=state['identity'], kind='evaluation',
+                           scorer=SCORER if (root/'evaluation-admission.json').exists() else None)
     state.update(status='REVIEW_REQUIRED', review=str(review.resolve()))
     durable_json(root/'state.json', state)
     print(f'REVIEW_REQUIRED: {review / "index.html"}', flush=True)
@@ -50,7 +56,10 @@ def validate_transition(action, state, updates=None):
 
 
 def launch(root, config, configuration, action):
-    _, state = validate_identity(root, config)
+    if action == 'evaluate' and config.get('profile') == 'historical-system-v1':
+        _, state, _ = validate_evaluation(root, config)
+    else:
+        _, state = validate_identity(root, config)
     validate_transition(action, state, config['updates'])
     prepared = read_json((root/'prepared.json').read_bytes())
     if action == 'evaluate' and state['status'] == 'REVIEW_REQUIRED':
@@ -108,6 +117,14 @@ def launch(root, config, configuration, action):
         complete = output/'complete.json'
         if result != 'EXITED' or not complete.exists():
             status = 'FAILED'
+            if (config.get('profile') == 'historical-system-v1' and not training
+                    and name in ('baseline', 'final') and result in ('EXITED', 'USER_STOP')
+                    and (output/'supervisor/stop.json').exists()):
+                files = inventory(p for p in output.rglob('*') if p.is_file()
+                                  and 'supervisor' not in p.relative_to(output).parts)
+                state.setdefault('partial_phases', {}).setdefault(name, []).append(
+                    dict(output=str(output.resolve()), files=files))
+                status = 'EVALUATION_PAUSED'
             if training and result == 'EXITED' and (root/'training-journal.json').exists():
                 journal = read_json((root/'training-journal.json').read_bytes())
                 if journal['status'] == 'CLEAN_STOP':
@@ -122,7 +139,7 @@ def launch(root, config, configuration, action):
                         state['budget_stop'] = reason
             durable_json(root/'state.json', state)
             print(f'{status}: {name}. Saved outputs and resource ledgers remain in {root}.', flush=True)
-            return 130 if status == 'CLEAN_STOP' else 1
+            return 130 if status in ('CLEAN_STOP', 'EVALUATION_PAUSED') else 1
         completion = read_json(complete.read_bytes())
         if completion.get('status') != 'COMPLETE' or (training and completion.get('updates') != config['updates']):
             state.update(status='FAILED', failed_phase=name, error='Invalid completion record')
@@ -163,7 +180,7 @@ def status_report(root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['prepare', 'train', 'evaluate', 'resume', 'status', 'review', '_worker'])
+    parser.add_argument('action', choices=['prepare', 'train', 'admit-evaluation', 'evaluate', 'resume', 'status', 'review', '_worker'])
     parser.add_argument('--configuration', type=Path, default=Path('configs/qwen35-4b-historical-pilot.json'))
     parser.add_argument('--run', type=Path, required=True)
     parser.add_argument('--reuse-prepared', action='store_true')
@@ -173,8 +190,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     root = args.run.resolve()
     config = read_configuration(args.configuration)
-    if config.get('profile') == 'historical-system-v1' and args.action in ('evaluate', 'review'):
+    if (config.get('profile') == 'historical-system-v1' and args.action in ('evaluate', 'review')
+            and not (root/'evaluation-admission.json').exists()):
         raise ValueError('System-profile evaluation awaits its separately tested scorer and admission path')
+    if args.action == 'admit-evaluation' and config.get('profile') != 'historical-system-v1':
+        raise ValueError('Evaluation admission applies only to the historical system profile')
     if args.reuse_prepared and args.action != 'prepare':
         raise ValueError('--reuse-prepared applies only to CPU preparation')
     if args.action == '_worker':
@@ -213,8 +233,14 @@ def main(argv=None):
                 if result != 'EXITED':
                     raise ValueError(f'CPU preparation failed: {result}')
             print(f'TRAINING_READY: {root}. No GPU worker started.', flush=True)
+        elif args.action == 'admit-evaluation':
+            admission = admit_evaluation(root, config)
+            print(f'EVALUATION_READY: {root}. Scorer {admission["scorer"]}. No GPU worker started.', flush=True)
         elif args.action == 'review':
-            _, state = validate_identity(root, config)
+            if config.get('profile') == 'historical-system-v1':
+                _, state, _ = validate_evaluation(root, config)
+            else:
+                _, state = validate_identity(root, config)
             if state['status'] != 'REVIEW_REQUIRED' or args.decisions is None:
                 raise ValueError('A pending review and --decisions file are required')
             directory = Path(state['review'])

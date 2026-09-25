@@ -6,8 +6,11 @@ from pathlib import Path
 import random
 
 from proxybench.evaluation.training_labels import paired_report, score
+from proxybench.evaluation.system_labels import (
+    SCORER_VERSION, apply_other_equivalences, paired_report_system, score_system, source_cells,
+)
 from proxybench.execution.resources import durable_json
-from proxybench.training.historical import check_files, inventory
+from proxybench.training.historical import binding, check_files, inventory
 from proxybench.training.smoke import digest, read_json
 
 
@@ -21,37 +24,50 @@ def source_text(meta, *, marked=True):
     return '\n'.join(blocks)
 
 
-def create_review(directory, cases, *, identity, kind):
+def create_review(directory, cases, *, identity, kind, scorer=None):
     directory.mkdir(exist_ok=False)
     rng = random.Random(42)
-    display, mapping, files = [], {}, []
+    display, mapping, files, answer_paths = [], {}, [], {}
     for case in cases:
         names = list(case['answers'])
         rng.shuffle(names)
         key = case['id']
         mapping[key] = dict(zip(('A', 'B'), names, strict=True))
         answers = {}
+        answer_paths[key] = {}
         for letter, name in mapping[key].items():
             path = Path(case['answers'][name])
             files.append(path)
             answer = read_json(path.read_bytes())
             answers[letter] = dict(text=answer.get('text', ''), status=answer.get('status'),
                                    token_ids=answer.get('token_ids', []))
-        display.append(dict(id=key, source=case['source'], reference=case.get('reference'), answers=answers))
+            if scorer == SCORER_VERSION:
+                answers[letter]['answer_sha256'] = binding(answer)
+                answer_paths[key][letter] = str(path)
+        row = dict(id=key, source=case['source'], reference=case.get('reference'), answers=answers)
+        if scorer == SCORER_VERSION:
+            row.update(source_cells=case['source_cells'], reference_sha256=binding(case['reference']))
+        display.append(row)
     packet = dict(kind=kind, identity=identity, cases=display, evidence=inventory(files))
+    if scorer == SCORER_VERSION:
+        packet.update(scorer=scorer, answer_paths=answer_paths)
     durable_json(directory/'packet.json', packet)
     durable_json(directory/'mapping.json', mapping)
     template = dict(packet_sha256=digest(directory/'packet.json'), reviewer='', rationale='',
                     cases={case['id']: ({'decision': 'PENDING', 'reason': ''} if kind == 'export' else
-                         {letter: dict(subject_equivalent=False, quotation_errors=[], reference_problem=False, reason='')
+                         {letter: dict(subject_equivalent=False, quotation_errors=[], reference_problem=False, reason='',
+                                       **({'other_equivalences': []} if scorer == SCORER_VERSION else {}))
                           for letter in ('A', 'B')}) for case in cases})
     durable_json(directory/'decision-template.json', template)
     sections = []
     for case in display:
+        cells = ('<pre>'+html.escape('\n'.join(
+            f"Block {cell['block_index']} cell {cell['cell_index']}: {cell['text']}"
+            for cell in case['source_cells']))+'</pre>') if scorer == SCORER_VERSION else ''
         reference = ('<details><summary>Accepted reference</summary><pre>'+html.escape(json.dumps(case['reference'], indent=2))+'</pre></details>') if case['reference'] else ''
         paired = ''.join('<section><h3>Answer '+letter+'</h3><p>'+html.escape(answer['status'])+'</p><pre>'+html.escape(answer['text'])+'</pre></section>'
                          for letter, answer in case['answers'].items())
-        sections.append('<article><h2>'+html.escape(case['id'])+'</h2><pre>'+html.escape(case['source'])+'</pre>'+reference+
+        sections.append('<article><h2>'+html.escape(case['id'])+'</h2><pre>'+html.escape(case['source'])+'</pre>'+cells+reference+
                         '<div class="pair">'+paired+'</div></article>')
     (directory/'index.html').write_text('<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">'
         '<title>Historical source review</title><style>body{font:16px sans-serif;margin:2em}pre{white-space:pre-wrap;overflow-wrap:anywhere}.pair{display:grid;grid-template-columns:1fr 1fr;gap:2em}article{border-bottom:2px solid #aaa}section{min-width:0}</style>'
@@ -88,6 +104,21 @@ def accept_decisions(directory, decisions, identity):
                         or any(not isinstance(v, str) for v in decision['quotation_errors'])
                         or not decision.get('reason')):
                     raise ValueError('Incomplete source-review decision')
+    if packet.get('scorer') == SCORER_VERSION:
+        for case in packet['cases']:
+            for letter, decision in decisions['cases'][case['id']].items():
+                if not isinstance(decision.get('other_equivalences'), list):
+                    raise ValueError('OTHER equivalence decisions must be a list')
+                answer = read_json(Path(packet['answer_paths'][case['id']][letter]).read_bytes())
+                if case['answers'][letter]['answer_sha256'] != binding(answer):
+                    raise ValueError('Reviewed answer changed')
+                from proxybench.evaluation.training_labels import parse_answer
+                prediction = parse_answer(answer)
+                if prediction is None and decision['other_equivalences']:
+                    raise ValueError('Malformed answer cannot receive OTHER equivalence')
+                if decision['other_equivalences']:
+                    apply_other_equivalences(case['reference'], prediction, answer, case,
+                                             decision['other_equivalences'])
     if (directory/'accepted.json').exists():
         raise FileExistsError(directory/'accepted.json')
     durable_json(directory/'accepted.json', dict(decisions=decisions, binding=frozen))
@@ -112,21 +143,32 @@ def finish_report(root, state, prepared):
     directory = root/'review-final'
     decisions, mapping = require_decisions(directory, state['identity'])
     metadata = [m for m in prepared['examples'] if m['split'] == 'development']
+    system = (root/'evaluation-admission.json').exists()
     cases, invalid = [], []
     for index, meta in enumerate(metadata):
         key = meta['packet']['manifest']['packet_id']
-        row = dict(id=key, family=meta['packet']['manifest']['family'])
-        reference = read_json(prepared['rows']['development'][index]['messages'][1]['content'])
+        manifest = meta['packet']['manifest']
+        row = dict(id=key, family=manifest['family'])
+        if system:
+            row.update(era=manifest['era'], layout=manifest['layout'], behavior_tags=manifest['behavior_tags'])
+        reference = read_json(prepared['rows']['development'][index]['messages'][-1]['content'])
         for letter, model in mapping[key].items():
             decision = decisions['cases'][key][letter]
             if decision['reference_problem']:
                 invalid.append(key)
             phase = 'baseline' if model == 'original' else 'final'
             answer = read_json((Path(state['completed_phases'][phase]['output'])/f'answer-{index}.json').read_bytes())
-            row[model] = score(reference, answer, source_text(meta, marked=False),
-                               subject_equivalent=decision['subject_equivalent'], quotation_errors=decision['quotation_errors'])
+            if system:
+                row[model] = score_system(reference, answer, meta,
+                                          subject_equivalent=decision['subject_equivalent'],
+                                          quotation_errors=decision['quotation_errors'],
+                                          other_equivalences=decision['other_equivalences'])
+            else:
+                row[model] = score(reference, answer, source_text(meta, marked=False),
+                                   subject_equivalent=decision['subject_equivalent'],
+                                   quotation_errors=decision['quotation_errors'])
         cases.append(row)
-    report = paired_report(cases)
+    report = paired_report_system(cases) if system else paired_report(cases)
     report.update(status='INVALID_REFERENCE' if invalid else 'COMPLETE', invalid_reference_cases=sorted(set(invalid)),
                   identity=state['identity'], review_sha256=digest(directory/'accepted.json'))
     durable_json(root/'report.json', report)
