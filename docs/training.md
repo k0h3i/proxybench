@@ -94,6 +94,8 @@ Public release requires the separate [release gate](release.md).
 
 The recorded optional environment uses Python 3.12.14.
 The implementing agent completes environment setup and CPU acceptance before handing over a GPU launch command.
+For a fresh clone, preparation includes installing llama.cpp and its required native libraries.
+An existing installation on the developer's machine does not satisfy that fresh-clone setup requirement.
 Use that Python version to create the root `.venv/`.
 Keep the interpreter and a working C/C++ compiler independent of disposable artifact directories.
 On Linux, the system `build-essential` package can provide the compiler.
@@ -111,6 +113,7 @@ CUDA_VISIBLE_DEVICES='' .venv/bin/python -m unittest discover -s tests -v
 
 Do not copy the old virtual environment into the new location.
 Require the complete CPU suite to pass without missing-dependency skips.
+Install the [pinned native runtime](inference.md#external-runtime) before testing library resolution or preparing GGUF inference.
 Make sure that the compiler, native libraries, and pinned base snapshot work without old artifact paths.
 Populate and inspect the external base cache during preparation without loading the model onto a GPU.
 Keep dependency installation and readiness checks out of GPU launch commands.

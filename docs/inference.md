@@ -43,11 +43,18 @@ The project publishes no timing or accuracy claim from deleted experiment report
 
 ## External runtime
 
+Install llama.cpp before running GGUF inference.
+Python package installation does not install this executable and its native libraries.
+The installation source is the [Unsloth llama.cpp release](https://github.com/unslothai/llama.cpp/releases/tag/b10909-mix-bea84f7).
 The recorded engine revision is `329b6160f513915f1c607dbfae3d5ce864a64a4f`, release `b10909-mix-bea84f7`.
 Keep its executable, required shared libraries, build information, notices, and runtime manifest in an external installation.
 The retained build uses CUDA 12.8 and x64 Linux.
 The current supported installation uses external CUDA 12 libraries and its own OpenMP library.
 It does not depend on a Torch library inside a deleted experiment environment.
+
+The tested fresh-installation commands are still an implementation deliverable in the [preparation plan](environment-cleanup-plan.md#fresh-clone-setup-is-part-of-preparation).
+That work must identify the exact download and checksum, install its dependencies, and produce the runtime manifest.
+The variables below select an existing installation. They do not install it.
 
 ```bash
 export PROXYBENCH_RUNTIME="$HOME/.local/share/proxybench/runtime/llama-329b6160"

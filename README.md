@@ -11,6 +11,8 @@ The project does not recover every record from a complete filing.
 Linux and WSL are supported with Python 3.11 or later.
 The CPU package has no runtime dependencies.
 Use a `.venv/` at the repository root for Python packages.
+GGUF inference also requires a separate llama.cpp installation and its native libraries.
+The [inference guide](docs/inference.md#external-runtime) identifies the pinned release and the pending fresh-installation procedure.
 Complete the [preparation stage](docs/training.md#preparation-stage-before-gpu-work), including model dependencies, before model execution.
 The user starts GPU work through the commands in the [training guide](docs/training.md).
 
