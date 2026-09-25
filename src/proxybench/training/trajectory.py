@@ -204,6 +204,8 @@ def train_updates(model, optimizer, order, loss_fn, journal_path, *, start=0, hi
             return clean_stop()
         if after_update:
             after_update(completed, history)
+        if stop():
+            return clean_stop()
         if save and (completed % checkpoint_interval == 0 or completed in checkpoint_steps):
             save(completed, history, False)
         if stop():

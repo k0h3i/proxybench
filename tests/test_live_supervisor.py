@@ -146,6 +146,21 @@ time.sleep(5)
         self.assertEqual(result, 'PHASE_TIMEOUT')
         self.assertLess(elapsed, 2)
 
+    def test_training_requests_clean_stop_before_hard_deadline(self):
+        script = """import os, time
+from pathlib import Path
+from proxybench.execution.resources import durable_json
+durable_json(os.environ['PROXYBENCH_PHASE_FILE'], {'phase': 'training'})
+while not Path(os.environ['PROXYBENCH_STOP_FILE']).exists():
+    time.sleep(.01)
+print('clean stop saved', flush=True)
+"""
+        result, saved, _, record = self.run_worker(
+            script, limits={'phase_seconds': 1.2, 'automatic_stop_margin_seconds': .6})
+        self.assertEqual(result, 'EXITED')
+        self.assertIn('clean stop saved', saved)
+        self.assertTrue(record['automatic_stop_requested'])
+
     def test_slow_memory_query_cannot_postpone_hard_deadline(self):
         release = threading.Event()
         calls = []

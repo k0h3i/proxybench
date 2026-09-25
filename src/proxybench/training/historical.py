@@ -320,16 +320,21 @@ def admit_schedule(state, entries, *, phase, operation=None):
     index = next(i for i, p in enumerate(PHASES) if p[0] == phase)
     resource = PHASES[index][1]
     used = sum(e['elapsed_seconds'] for e in entries[resource])
-    phase_used = sum(e['elapsed_seconds'] for e in entries[resource] if e.get('phase') == phase)
-    remaining = {n: state['reservations'][n] for n, r, _ in PHASES[index:] if r == resource
+    spent = {n: sum(e['elapsed_seconds'] for e in entries[resource] if e.get('phase') == n)
+             for n, r, _ in PHASES[index:] if r == resource}
+    phase_used = spent[phase]
+    limits = state.get('resource_limits', {})
+    system_training = phase == 'training' and limits.get('training_phase') == 6000
+    remaining = {n: (max(0, state['reservations'][n] - spent[n]) if system_training and n == phase
+                     else state['reservations'][n]) for n, r, _ in PHASES[index:] if r == resource
                  and (operation is None or n in operation)
                  and n not in state['completed_phases']}
-    limits = state.get('resource_limits', {})
     reserve = (limits.get('stop_reserve', 120) + limits.get('test_reserve', 0)) if resource == 'gpu' else 0
     total = limits.get('gpu_total', 7200) if resource == 'gpu' else limits.get('cpu_total', 3600)
     phase_limit = (limits.get('training_phase', 1800) if phase == 'training' else
                    limits.get('gpu_phase', 1800) if resource == 'gpu' else limits.get('cpu_phase', 1800))
-    if (used+sum(remaining.values())+reserve > total
+    if (remaining[phase] <= 0 or phase_used >= phase_limit
+            or used+sum(remaining.values())+reserve > total
             or phase_used+remaining[phase] > phase_limit):
         raise ValueError('The complete remaining schedule does not fit the cumulative or phase budget')
     return dict(resource=resource, used_seconds=used, phase_used_seconds=phase_used,

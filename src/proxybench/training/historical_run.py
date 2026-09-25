@@ -64,6 +64,8 @@ def launch(root, config, configuration, action):
         return 0 if state['status'] == 'COMPLETE' else 1
     training = action in ('train', 'resume')
     if state['status'] == 'CLEAN_STOP':
+        if state.get('budget_stop'):
+            raise ValueError('Training stopped because the fixed time budget cannot fit the remaining work')
         journal = read_json((root/'training-journal.json').read_bytes())
         require_clean_stop(journal, Path(journal['checkpoint']), dict(run=state['identity'], order=binding(prepared['order'])))
     phases = ['training'] if training else list(EVALUATION_PHASES)
@@ -94,6 +96,8 @@ def launch(root, config, configuration, action):
             limits = config['cpu_limits' if resource == 'cpu' else 'limits']
             if config.get('profile') == 'historical-system-v1' and resource == 'gpu' and name != 'training':
                 limits = dict(limits, phase_seconds=1800)
+            elif config.get('profile') == 'historical-system-v1' and name == 'training':
+                limits = dict(limits, automatic_stop_margin_seconds=300)
             result = supervise(command, output/'supervisor', limits,
                                ledger=root/f'{resource}-ledger.jsonl', phase=name, phase_used=admission['phase_used_seconds'],
                                environment=environment(config, root))
@@ -110,6 +114,12 @@ def launch(root, config, configuration, action):
                     require_clean_stop(journal, Path(journal['checkpoint']), dict(run=state['identity'], order=binding(prepared['order'])))
                     status = 'CLEAN_STOP'
             state.update(status=status, failed_phase=name, supervisor_status=result)
+            if status == 'CLEAN_STOP':
+                stop_file = output/'supervisor/stop.json'
+                if stop_file.exists():
+                    reason = read_json(stop_file.read_bytes()).get('reason')
+                    if reason in {'TIME_BUDGET_MARGIN', 'TRAINING_FORECAST'}:
+                        state['budget_stop'] = reason
             durable_json(root/'state.json', state)
             print(f'{status}: {name}. Saved outputs and resource ledgers remain in {root}.', flush=True)
             return 130 if status == 'CLEAN_STOP' else 1

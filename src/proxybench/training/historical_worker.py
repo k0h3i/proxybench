@@ -24,6 +24,18 @@ def stopping():
     return bool(os.environ.get('PROXYBENCH_STOP_FILE') and Path(os.environ['PROXYBENCH_STOP_FILE']).exists())
 
 
+def forecast_training_seconds(history, order, items):
+    """Estimate unfinished updates from recent GPU timings and known token lengths."""
+    completed = len(history)
+    if completed < 36 or completed >= len(order):
+        return None
+    recent = history[-12:]
+    recent_tokens = sum(items[row['index']]['combined_tokens'] for row in recent)
+    pending_tokens = sum(items[index]['combined_tokens'] for index in order[completed:])
+    # Leave room for checkpoint saves and final adapter publication.
+    return 1.25 * sum(row['update_seconds'] for row in recent) / recent_tokens * pending_tokens + 120
+
+
 def gpu_phase(root, name, output, config):
     if name not in {'training', 'original-export', 'trained-export'}:
         raise ValueError('Expected training or an evaluation export')
@@ -128,6 +140,21 @@ def gpu_phase(root, name, output, config):
             phase('training')
             return path
 
+        def forecast_stop(step, rows):
+            if config.get('profile') != 'historical-system-v1':
+                return
+            estimate = forecast_training_seconds(rows, order, prepared['items']['training'])
+            if estimate is None:
+                return
+            deadline = min(float(os.environ['PROXYBENCH_PHASE_DEADLINE']),
+                           float(os.environ['PROXYBENCH_TOTAL_DEADLINE']))
+            if time.monotonic() + estimate >= deadline and not stopping():
+                durable_json(os.environ['PROXYBENCH_STOP_FILE'],
+                             dict(reason='TRAINING_FORECAST', completed=step,
+                                  remaining_estimate_seconds=estimate))
+                print(f'Training forecast exceeds remaining budget after update {step}. '
+                      'Saving a clean stop.', flush=True)
+
         phase('training')
         result = train_updates(model, optimizer, order,
                     lambda i: (loss(prepared['items']['training'][i]), prepared['items']['training'][i]['response_tokens']),
@@ -136,6 +163,7 @@ def gpu_phase(root, name, output, config):
                     checkpoint_steps=({config['training_examples'], config['updates']}
                                       if config.get('profile') == 'historical-system-v1' else ()),
                     before_update=lambda step: phase('compilation') if step == 1 else phase('training') if step == 2 else None,
+                    after_update=forecast_stop,
                     memory=memory, report=lambda message: print(message, flush=True))
         durable_json(output/'training-result.json', result)
         if result['status'] == 'CLEAN_STOP':

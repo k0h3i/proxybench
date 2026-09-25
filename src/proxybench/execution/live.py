@@ -113,6 +113,7 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                   boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
     durable_json(active, dict(record, status='STARTED'))
     interruptions, acknowledged = 0, 0
+    automatic_stop = False
     requested_at = None
 
     def interrupt(signum, frame):
@@ -132,7 +133,9 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
         env = dict(os.environ, **(environment or {}),
                    PROXYBENCH_PHASE_FILE=str((output / 'phase.json').resolve()),
                    PROXYBENCH_REQUEST_FILE=str((output / 'request.json').resolve()),
-                   PROXYBENCH_STOP_FILE=str((output / 'stop.json').resolve()))
+                   PROXYBENCH_STOP_FILE=str((output / 'stop.json').resolve()),
+                   PROXYBENCH_PHASE_DEADLINE=str(start + limits['phase_seconds'] - phase_used),
+                   PROXYBENCH_TOTAL_DEADLINE=str(start + limits['total_seconds'] - used))
         if cpu:
             env['CUDA_VISIBLE_DEVICES'] = ''
         durable_json(output / 'configuration.json', dict(command=command, limits=limits,
@@ -190,9 +193,20 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                         memory.flush()
                     if tick-last_sample > 6:
                         reason = 'MEMORY_MONITOR_STALE'
+                    margin = limits.get('automatic_stop_margin_seconds', 0)
+                    if (margin and reason is None and not automatic_stop and not interruptions
+                            and not (output / 'stop.json').exists()
+                            and label in {'training', 'compilation', 'saving'}
+                            and min(limits['total_seconds']-used-(tick-start),
+                                    limits['phase_seconds']-phase_used-(tick-start)) <= margin):
+                        automatic_stop = True
+                        durable_json(output / 'stop.json', dict(requested_monotonic=tick,
+                                                                 reason='TIME_BUDGET_MARGIN'))
+                        display.put('Time budget margin reached. Saving at a safe boundary.\n')
                     if interruptions and stopped_at is None:
                         stopped_at = requested_at
-                        durable_json(output / 'stop.json', dict(requested_monotonic=requested_at))
+                        if not (output / 'stop.json').exists():
+                            durable_json(output / 'stop.json', dict(requested_monotonic=requested_at))
                         if label not in {'training', 'compilation', 'saving'}:
                             reason = 'USER_STOP'
                     if interruptions > 1:
@@ -234,7 +248,8 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
         durable_json(output / 'result.json', dict(entry, returncode=process.returncode if process else None,
                      surviving_owned_pids=survivors, total_used_seconds=used+elapsed,
                      phase_used_seconds=phase_used+elapsed, minimum_device_free_bytes=minimum_free,
-                     stop_requested=bool(interruptions)))
+                     stop_requested=bool(interruptions or automatic_stop or (output / 'stop.json').exists()),
+                     automatic_stop_requested=automatic_stop))
         if not survivors:
             active.unlink()
             lock.unlink()
