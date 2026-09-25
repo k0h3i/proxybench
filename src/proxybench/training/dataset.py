@@ -157,6 +157,9 @@ def publish(root, packets, policy, review_path, approval_path, output, *, assign
 def read_release(path):
     path = Path(path)
     manifest = read_json((path / 'manifest.json').read_bytes())
+    if manifest.get('schema') == 'historical-dataset-system-v1':
+        from proxybench.training.system_release import read_system_release
+        return read_system_release(path, manifest)
     if manifest.get('schema') != 'historical-dataset-v1' or manifest.get('status') != 'COMPLETE':
         raise ValueError('Incomplete or unsupported dataset')
     for name, key in [('policy.md', 'policy_sha256'), ('review.json', 'review_sha256'), ('acceptance.json', 'acceptance_sha256')]:

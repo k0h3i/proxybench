@@ -38,6 +38,14 @@ ACCEPTED_RELEASES = {
             'training.jsonl': '1932588c3eb4bd578aff8bae87bcab49dc3fc9fff7c116aef11e87dd20a1f58d',
             'development.jsonl': '229e03d17e8c75454b7078b1be3ea447603f21dd02fe49a3c6c5ebbb5ba0ab8f',
             'policy.md': '04e4950a4ad5e45b34f543ead1971459722fe61d49b7117684445849d9568bae'}),
+    'data/annotations/sol-historical-20260925-b35-system-v1': dict(
+        training_examples=330, development_examples=90,
+        release_hashes={
+            'manifest.json': '46cb74c60b64b09569c1b23e4ba30cd45ae69c19d66eb9ccd8e46c442b9f2895',
+            'training.jsonl': 'd0ce2c68b9bbb7b5ae1218ceb278089bde7300e1c7ad4e01442197d57262f284',
+            'development.jsonl': '37dfb231cef2ac053af75cc4a530ce4d3bd63613384aab97df31ea4d2c16593e',
+            'policy.md': '04e4950a4ad5e45b34f543ead1971459722fe61d49b7117684445849d9568bae',
+            'system-prompt.txt': 'fb828305c494f90092180ae4e0dea4290b00f7f90fbb47ec34f8dff1810f3a93'}),
 }
 
 
@@ -57,6 +65,9 @@ def check_files(files):
 
 def read_configuration(path):
     config = read_json(Path(path).read_bytes())
+    system_run = config.get('profile') == 'historical-system-v1'
+    if config.get('profile') not in (None, 'historical-system-v1'):
+        raise ValueError('Unknown historical run profile')
     expected = dict(epochs=2, batch_size=1, accumulation=1, seed=42, rank=8, alpha=16, dropout=0,
                     learning_rate=.0001, weight_decay=0, max_grad_norm=1.0,
                     context_tokens=5120, input_tokens=3328, response_tokens=1792,
@@ -69,10 +80,20 @@ def read_configuration(path):
     counts = {key: config.get(key) for key in ('training_examples', 'development_examples')}
     if counts != {key: release[key] for key in counts} or config.get('updates') != config['training_examples'] * config['epochs']:
         raise ValueError('Configuration counts differ from the selected release')
-    if (config['limits']['total_seconds'] != 7200 or config['cpu_limits']['total_seconds'] != 3600
-            or any(config[k]['phase_seconds'] != 1800 or config[k]['grace_seconds'] != 30
-                   or config[k]['fixed_phase'] is not True for k in ('limits', 'cpu_limits'))):
+    if system_run != (config['release'] == 'data/annotations/sol-historical-20260925-b35-system-v1'):
+        raise ValueError('Run profile differs from the reviewed release')
+    if (config['limits']['total_seconds'] != (14400 if system_run else 7200)
+            or config['cpu_limits']['total_seconds'] != 3600
+            or config['limits']['phase_seconds'] != (6000 if system_run else 1800)
+            or config['cpu_limits']['phase_seconds'] != 1800
+            or any(config[k]['grace_seconds'] != 30 or config[k]['fixed_phase'] is not True
+                   for k in ('limits', 'cpu_limits'))):
         raise ValueError('Configuration differs from the reviewed resource ceilings')
+    if system_run:
+        if (config.get('checkpoint_interval') != 96
+                or config.get('system_prompt') != 'configs/qwen35-4b-historical-system-v1.txt'
+                or sha(Path(config['system_prompt']).read_bytes()) != release['release_hashes']['system-prompt.txt']):
+            raise ValueError('System prompt or checkpoint cadence differs from the frozen run')
     if (config['minimum_disk_bytes'] < 60*1024**3 or config['limits']['device_margin_bytes'] < 2*1024**3
             or config['cpu_limits'].get('cpu_only') is not True
             or config['limits'].get('cpu_only', False)
@@ -91,11 +112,17 @@ def prepare_sequences(tokenizer, rows, config):
     for split in ('training', 'development'):
         result[split] = []
         for row in rows[split]:
-            prompt, answer = (m['content'] for m in row['messages'])
-            for value in (prompt, answer):
+            messages = row['messages']
+            if len(messages) == 2:
+                system, prompt, answer = None, messages[0]['content'], messages[1]['content']
+            elif len(messages) == 3 and [m['role'] for m in messages] == ['system', 'user', 'assistant']:
+                system, prompt, answer = (m['content'] for m in messages)
+            else:
+                raise ValueError('Historical sequence has unsupported message roles')
+            for value in (prompt, answer, *([system] if system is not None else [])):
                 if any(marker in value for marker in ('<|im_start|>', '<|im_end|>', '<|endoftext|>', '<think>', '</think>')):
                     raise ValueError('Reserved template marker in source or answer')
-            item = sequence(tokenizer, prompt, answer, context_cap=config['context_tokens'])
+            item = sequence(tokenizer, prompt, answer, context_cap=config['context_tokens'], system=system)
             suffix = item['input_ids'][item['input_tokens']:]
             eos = tokenizer.eos_token_id
             # Supervise through the end token, excluding template whitespace after it.
@@ -175,15 +202,30 @@ def prepare_run(root, config, configuration_path):
     prepared = dict(items=items, rows=rows, examples=manifest['examples'],
                     order=sample_order(config['training_examples'], config['epochs'], config['seed']),
                     panel=panel_indices(items['training']), eos=tokenizer.eos_token_id, pad=tokenizer.pad_token_id)
+    if config.get('profile') == 'historical-system-v1':
+        # Pilot wall-clock measurements include loading, compilation, and saving.
+        pilot_mean = 2808.875
+        mean = sum(x['combined_tokens'] for x in items['training']) / len(items['training'])
+        training = 452.40 / 192 * config['updates'] * mean / pilot_mean * 1.25
+        development = (325.92 + 314.84) / 24 * config['development_examples'] * 1.25
+        if training > 6000 or development > 3300:
+            raise ValueError('The 25 percent CPU forecast exceeds the reserved GPU work')
+        prepared['forecast'] = dict(training_seconds=training, development_seconds=development,
+                                    test_reserve_seconds=3300, allowance=1.25,
+                                    basis='Measured 192-update pilot and 24-pair development run')
     durable_json(root/'prepared.json', prepared)
     print(f'CPU sequences: {config["training_examples"]} training, '
           f'{config["development_examples"]} development, {config["updates"]} updates. '
           'Hashing runtime files.', flush=True)
     code = inventory(Path('src/proxybench').rglob('*.py'))
-    inputs = inventory([*release.rglob('*'), Path(config['provenance']), Path(configuration_path),
+    parent_files = (list(Path(manifest['parent_release']).rglob('*'))
+                    if config.get('profile') == 'historical-system-v1' else [])
+    inputs = inventory([*release.rglob('*'), *parent_files, Path(config['provenance']), Path(configuration_path),
+                        *([Path(config['system_prompt'])] if config.get('profile') == 'historical-system-v1' else []),
                         *(Path(m['packet']['manifest']['source_path']) for m in manifest['examples'])])
     runtime = runtime_files(config)
-    identity = dict(schema='historical-pilot-v1', configuration=config,
+    identity = dict(schema='historical-system-v1' if config.get('profile') == 'historical-system-v1' else 'historical-pilot-v1',
+                    configuration=config,
                     git_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                     code=code, inputs=inputs, model=model_files, runtime=runtime,
                     executable=str(Path(sys.executable).absolute()), python=sys.version,
@@ -191,8 +233,15 @@ def prepare_run(root, config, configuration_path):
                               if d.metadata['Name']},
                     prepared_sha256=digest(root/'prepared.json'), tokenizer=inventory((root/'tokenizer').rglob('*')))
     durable_json(root/'identity.json', identity)
+    system_run = config.get('profile') == 'historical-system-v1'
+    reservations = ({'training': 6000, 'original-export': 300, 'original-conversion': 600,
+                     'trained-export': 300, 'trained-conversion': 600, 'baseline': 1650, 'final': 1650}
+                    if system_run else {n: s for n, _, s in PHASES})
+    limits = (dict(gpu_total=14400, cpu_total=3600, gpu_phase=1800, training_phase=6000,
+                   cpu_phase=1800, stop_reserve=1200, test_reserve=3300) if system_run else None)
     durable_json(root/'state.json', dict(status='TRAINING_READY', operation='separate', completed_phases={}, attempts={},
-                                       identity=binding(identity), reservations={n: s for n, _, s in PHASES}))
+                                       identity=binding(identity), reservations=reservations,
+                                       **({'resource_limits': limits} if limits else {})))
 
 
 def validate_identity(root, config):
@@ -275,9 +324,13 @@ def admit_schedule(state, entries, *, phase, operation=None):
     remaining = {n: state['reservations'][n] for n, r, _ in PHASES[index:] if r == resource
                  and (operation is None or n in operation)
                  and n not in state['completed_phases']}
-    reserve = 120 if resource == 'gpu' else 0
-    if (used+sum(remaining.values())+reserve > (7200 if resource == 'gpu' else 3600)
-            or phase_used+remaining[phase] > 1800):
+    limits = state.get('resource_limits', {})
+    reserve = (limits.get('stop_reserve', 120) + limits.get('test_reserve', 0)) if resource == 'gpu' else 0
+    total = limits.get('gpu_total', 7200) if resource == 'gpu' else limits.get('cpu_total', 3600)
+    phase_limit = (limits.get('training_phase', 1800) if phase == 'training' else
+                   limits.get('gpu_phase', 1800) if resource == 'gpu' else limits.get('cpu_phase', 1800))
+    if (used+sum(remaining.values())+reserve > total
+            or phase_used+remaining[phase] > phase_limit):
         raise ValueError('The complete remaining schedule does not fit the cumulative or phase budget')
     return dict(resource=resource, used_seconds=used, phase_used_seconds=phase_used,
                 remaining=remaining, stop_reserve_seconds=reserve)

@@ -132,7 +132,9 @@ def gpu_phase(root, name, output, config):
         result = train_updates(model, optimizer, order,
                     lambda i: (loss(prepared['items']['training'][i]), prepared['items']['training'][i]['response_tokens']),
                     journal, start=completed, history=history, stop=stopping, save=save,
-                    checkpoint_interval=config['updates']//4,
+                    checkpoint_interval=config.get('checkpoint_interval', config['updates']//4),
+                    checkpoint_steps=({config['training_examples'], config['updates']}
+                                      if config.get('profile') == 'historical-system-v1' else ()),
                     before_update=lambda step: phase('compilation') if step == 1 else phase('training') if step == 2 else None,
                     memory=memory, report=lambda message: print(message, flush=True))
         durable_json(output/'training-result.json', result)

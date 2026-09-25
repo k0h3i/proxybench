@@ -30,7 +30,7 @@ def create_final_review(root, state, prepared):
     for index, meta in enumerate(metadata):
         key = meta['packet']['manifest']['packet_id']
         cases.append(dict(id=key, source=source_text(meta),
-                          reference=read_json(prepared['rows']['development'][index]['messages'][1]['content']),
+                          reference=read_json(prepared['rows']['development'][index]['messages'][-1]['content']),
                           answers={model: str(Path(state['completed_phases'][phase]['output'])/f'answer-{index}.json')
                                    for model, phase in [('original', 'baseline'), ('trained', 'final')]}))
     review = create_review(root/'review-final', cases, identity=state['identity'], kind='evaluation')
@@ -71,7 +71,9 @@ def launch(root, config, configuration, action):
           if training else
           (f'Evaluation: original and trained models on the same '
            f'{config["development_examples"]} development examples.'), flush=True)
-    print('Limits: 120 cumulative GPU minutes, 60 CPU minutes, 30 minutes per phase.', flush=True)
+    print(('Limits: 240 cumulative GPU minutes; training 100 minutes; other GPU phases 30 minutes.'
+           if config.get('profile') == 'historical-system-v1' else
+           'Limits: 120 cumulative GPU minutes, 60 CPU minutes, 30 minutes per phase.'), flush=True)
     for name in phases:
         if name in state['completed_phases']:
             continue
@@ -89,7 +91,10 @@ def launch(root, config, configuration, action):
         command = [sys.executable, '-u', '-m', 'proxybench.training.historical_run', '_worker',
                    '--phase', name, '--configuration', str(configuration), '--run', str(root), '--output', str(output)]
         try:
-            result = supervise(command, output/'supervisor', config['cpu_limits' if resource == 'cpu' else 'limits'],
+            limits = config['cpu_limits' if resource == 'cpu' else 'limits']
+            if config.get('profile') == 'historical-system-v1' and resource == 'gpu' and name != 'training':
+                limits = dict(limits, phase_seconds=1800)
+            result = supervise(command, output/'supervisor', limits,
                                ledger=root/f'{resource}-ledger.jsonl', phase=name, phase_used=admission['phase_used_seconds'],
                                environment=environment(config, root))
         except (ValueError, OSError, RuntimeError) as exc:
@@ -158,6 +163,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     root = args.run.resolve()
     config = read_configuration(args.configuration)
+    if config.get('profile') == 'historical-system-v1' and args.action in ('evaluate', 'review'):
+        raise ValueError('System-profile evaluation awaits its separately tested scorer and admission path')
     if args.reuse_prepared and args.action != 'prepare':
         raise ValueError('--reuse-prepared applies only to CPU preparation')
     if args.action == '_worker':

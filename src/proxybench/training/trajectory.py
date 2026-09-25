@@ -150,7 +150,7 @@ def require_clean_stop(journal, checkpoint, identity):
 
 def train_updates(model, optimizer, order, loss_fn, journal_path, *, start=0, history=None,
                   stop=lambda: False, save=None, checkpoint_interval=48, before_update=None, after_update=None,
-                  memory=lambda: {}, report=print):
+                  memory=lambda: {}, report=print, checkpoint_steps=()):
     """Use this same loop for the pilot and the CPU resume equivalence test."""
     import torch
     history = list(history or [])
@@ -204,7 +204,7 @@ def train_updates(model, optimizer, order, loss_fn, journal_path, *, start=0, hi
             return clean_stop()
         if after_update:
             after_update(completed, history)
-        if save and completed % checkpoint_interval == 0:
+        if save and (completed % checkpoint_interval == 0 or completed in checkpoint_steps):
             save(completed, history, False)
         if stop():
             return clean_stop()

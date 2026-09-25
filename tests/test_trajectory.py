@@ -110,3 +110,12 @@ class TrajectoryTests(unittest.TestCase):
                                    report=lambda _: None)
         self.assertEqual(result['completed'], 8)
         self.assertEqual(saved, [(2, False), (4, False), (6, False), (8, False)])
+
+    def test_epoch_and_final_checkpoints_join_periodic_saves(self):
+        model, optimizer, loss = self.build()
+        saved = []
+        with tempfile.TemporaryDirectory() as tmp:
+            train_updates(model, optimizer, list(range(8)), loss, Path(tmp)/'journal.json',
+                          checkpoint_interval=3, checkpoint_steps={4, 8},
+                          save=lambda step, history, clean: saved.append(step), report=lambda _: None)
+        self.assertEqual(saved, [3, 4, 6, 8])

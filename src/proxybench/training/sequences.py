@@ -1,8 +1,9 @@
 """Exact chat-template lengths and response-only loss masks without truncation."""
 
 
-def sequence(tokenizer, prompt, response, *, context_cap):
-    messages = [{"role": "user", "content": prompt}]
+def sequence(tokenizer, prompt, response, *, context_cap, system=None):
+    messages = ([] if system is None else [{"role": "system", "content": system}])
+    messages.append({"role": "user", "content": prompt})
     prefix = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
                                            enable_thinking=False, return_dict=False)
     complete = tokenizer.apply_chat_template(messages + [{"role": "assistant", "content": response}],

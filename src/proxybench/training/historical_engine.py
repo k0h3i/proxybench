@@ -166,7 +166,9 @@ def engine(root, name, output, config):
                 if stopping():
                     return
                 prompt = generation_input(prepared['items'][split][index])
-                rendered = tokenizer.apply_chat_template([prepared['rows'][split][index]['messages'][0]],
+                messages = prepared['rows'][split][index]['messages']
+                prompt_messages = messages[:-1] if messages[-1]['role'] == 'assistant' else messages
+                rendered = tokenizer.apply_chat_template(prompt_messages,
                               tokenize=False, add_generation_prompt=True, enable_thinking=False)
                 require_prompt_tokens(port, rendered, prompt)
                 agreements.append(dict(index=index, prompt_token_ids=prompt))
