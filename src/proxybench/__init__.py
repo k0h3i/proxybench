@@ -1,1 +1,1 @@
-"""Historical SEC N-PX extraction experiments."""
+"""Historical SEC N-PX fragment extraction and model workflows."""

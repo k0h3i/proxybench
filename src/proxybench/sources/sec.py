@@ -1,6 +1,5 @@
 """Download a bounded SEC archive selection through one declared client."""
 
-import argparse
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -10,9 +9,30 @@ import shutil
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, HTTPRedirectHandler, build_opener
 
 GIB = 1024 ** 3
+
+
+def validate_url(url):
+    parsed = urlparse(url)
+    if (parsed.scheme != 'https' or parsed.hostname not in {'www.sec.gov', 'data.sec.gov'}
+            or parsed.username is not None or parsed.password is not None
+            or parsed.port not in (None, 443)):
+        raise ValueError('Only official SEC HTTPS URLs without credentials or unsafe ports are allowed')
+    return url
+
+
+class SecRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Validate before urllib can forward the declared client identity.
+        validate_url(newurl)
+        time.sleep(0.5)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def urlopen(request, *, timeout):
+    return build_opener(SecRedirects()).open(request, timeout=timeout)
 
 
 def now():
@@ -27,9 +47,7 @@ def save(path, state):
 
 def fetch(url, output, state_path, user_agent, *, kind='filing',
           max_bytes=4 * GIB, max_document_bytes=100 * 1024 ** 2, max_filings=60):
-    parsed = urlparse(url)
-    if parsed.scheme != 'https' or parsed.hostname not in {'www.sec.gov', 'data.sec.gov'}:
-        raise ValueError('Only official SEC HTTPS URLs are allowed')
+    validate_url(url)
     if kind not in {'index', 'filing'} or not user_agent.strip():
         raise ValueError('A declared client identity and download kind are required')
     output, state_path = Path(output), Path(state_path)
@@ -60,6 +78,7 @@ def fetch(url, output, state_path, user_agent, *, kind='filing',
         state['last_request'] = time.time()
         save(state_path, state)
         response = None
+        partial = None
         try:
             try:
                 response = urlopen(Request(url, headers={'User-Agent': user_agent,
@@ -114,7 +133,7 @@ def fetch(url, output, state_path, user_agent, *, kind='filing',
             # Recognize a block page even when a proxy preserves HTTP 200.
             with partial.open('rb') as stream:
                 beginning = stream.read(65536).lower()
-            if any(marker in beginning for marker in (b'undeclared automated tool', b'request rate threshold exceeded')):
+            if any(marker in beginning for marker in (b'undeclared automated tool', b'request rate threshold exceeded', b'file unavailable')):
                 state['blocked'] = True
                 event['status'] = 'blocked'
                 raise RuntimeError('SEC acquisition stopped on a block page')
@@ -127,6 +146,9 @@ def fetch(url, output, state_path, user_agent, *, kind='filing',
         except Exception as error:
             if event['status'] == 'started':
                 event['status'] = 'transport_error'
+            if partial is not None and partial.exists():
+                partial.unlink()
+            event.pop('partial_path', None)
             # Do not record request headers or contact details.
             event['error_type'] = type(error).__name__
             raise
@@ -145,23 +167,3 @@ def index_rows(raw):
             cik, registrant, form, filed, path = parts
             yield dict(cik=cik.strip(), registrant=registrant, form=form, filed=filed,
                        archive_path=path, accession=Path(path).stem)
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__)
-    source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument('--url')
-    source.add_argument('--selection', type=Path)
-    parser.add_argument('--output', type=Path)
-    parser.add_argument('--state', type=Path, required=True)
-    parser.add_argument('--identity-file', type=Path, required=True)
-    parser.add_argument('--kind', choices=['index', 'filing'], default='filing')
-    args = parser.parse_args()
-    identity = json.loads(args.identity_file.read_text())['user_agent']
-    if args.url and args.output is None:
-        parser.error('--url requires --output')
-    selection = json.loads(args.selection.read_text()) if args.selection else [
-        dict(url=args.url, output=str(args.output), kind=args.kind)]
-    for item in selection:
-        event = fetch(item['url'], item['output'], args.state, identity, kind=item.get('kind', 'filing'))
-        print(json.dumps({k: event[k] for k in ('status', 'bytes', 'sha256', 'output')}), flush=True)

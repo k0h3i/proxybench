@@ -43,7 +43,9 @@ def json_request(port, route, value=None, *, timeout=10):
         connection.request('GET' if value is None else 'POST', route, body=raw,
                            headers={'Content-Type': 'application/json'})
         response = connection.getresponse()
-        body = response.read()
+        body = response.read(4 * 1024 * 1024 + 1)
+        if len(body) > 4 * 1024 * 1024:
+            raise ValueError('Server response exceeds its size limit')
         if response.status != 200:
             raise ValueError(f'Server HTTP {response.status}: {body[:300]!r}')
         return json.loads(body)
@@ -79,6 +81,7 @@ def generate(port, tokenizer, prompt, path, *, index, maximum=1792, forced=False
         durable_json(deadline_file, dict(request_path=str(path.resolve()), deadline_monotonic=started + deadline))
     connection = http.client.HTTPConnection('127.0.0.1', port, timeout=deadline)
     tokens, events, terminal, max_chunk_tokens = [], [], None, 0
+    captured_bytes = 0
     try:
         with path.with_suffix('.response.bin').open('xb') as raw, path.with_suffix('.tokens.jsonl').open('x') as saved:
             connection.request('POST', '/completion', body=wire, headers={'Content-Type': 'application/json'})
@@ -92,9 +95,14 @@ def generate(port, tokenizer, prompt, path, *, index, maximum=1792, forced=False
                         raise TimeoutError('Client request deadline')
                     if connection.sock is not None:
                         connection.sock.settimeout(remaining)
-                line = response.readline()
+                line = response.readline(1024 * 1024 + 1)
+                if len(line) > 1024 * 1024:
+                    raise ValueError('Server event exceeds its size limit')
                 if not line:
                     break
+                captured_bytes += len(line)
+                if captured_bytes > 16 * 1024 * 1024:
+                    raise ValueError('Server stream exceeds its size limit')
                 raw.write(line)
                 raw.flush()
                 if not line.startswith(b'data: '):
@@ -108,6 +116,8 @@ def generate(port, tokenizer, prompt, path, *, index, maximum=1792, forced=False
                 ids = chunk.get('tokens', [])
                 if not isinstance(ids, list) or any(type(t) is not int for t in ids):
                     raise ValueError('Invalid returned token IDs')
+                if len(tokens) + len(ids) > maximum:
+                    raise ValueError('Server exceeded the output token limit')
                 max_chunk_tokens = max(max_chunk_tokens, len(ids))
                 for token in ids:
                     event = dict(token_id=token, seconds=arrived)

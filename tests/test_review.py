@@ -6,7 +6,7 @@ import unittest
 import re
 
 from proxybench.annotation.bindings import review_binding
-from proxybench.annotation.packets import FIELDS
+from proxybench.training.labels import FIELDS
 from proxybench.annotation.review import load_suggestions, write_review
 
 
@@ -23,7 +23,7 @@ class ReviewTests(unittest.TestCase):
         draft['input_binding'] = review_binding(packets[0])
         path = root / 'drafts.json'
         path.write_text(json.dumps({'draft_set_id': 'synthetic-v1', 'packets': {'synthetic-1': draft}}))
-        directory = root / 'data/packets/calibration'
+        directory = root / 'review'
         directory.mkdir(parents=True)
         (directory / 'packet-set.json').write_text(json.dumps(packets))
         return packets, path
@@ -54,13 +54,13 @@ class ReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _, path = self.fixture(root)
-            source_path = root / 'data/packets/calibration/packet-set.json'
+            source_path = root / 'review/packet-set.json'
             original = source_path.read_bytes()
             data = json.loads(path.read_text())
             data['packets']['synthetic-1']['fields']['ticker']['note'] = '</script><script>alert(1)</script>'
             path.write_text(json.dumps(data))
             raw_drafts = path.read_bytes()
-            page = write_review(root, draft_path=path).read_text()
+            page = write_review(root, packet_directory="review", training_contract="Contract", draft_path=path).read_text()
             self.assertNotIn('</script><script>alert(1)</script>', page)
             self.assertIn('id="assistant-data"', page)
             self.assertIn('id="reveal" class="primary" disabled', page)
@@ -77,8 +77,8 @@ class ReviewTests(unittest.TestCase):
             data['packets']['synthetic-1']['input_binding'] = review_binding(packets[0])
             data['packets']['synthetic-1']['fields']['ticker']['note'] = markers
             path.write_text(json.dumps(data))
-            (root / 'data/packets/calibration/packet-set.json').write_text(json.dumps(packets))
-            page = write_review(root, draft_path=path).read_text()
+            (root / 'review/packet-set.json').write_text(json.dumps(packets))
+            page = write_review(root, packet_directory="review", training_contract="Contract", draft_path=path).read_text()
             payload = json.loads(re.search(r'<script id="packet-data" type="application/json">(.*?)</script>', page, re.S)[1])
             drafts = json.loads(re.search(r'<script id="assistant-data" type="application/json">(.*?)</script>', page, re.S)[1])
             self.assertEqual(payload[0]['source_view'], packets[0]['source_view'])
@@ -104,12 +104,12 @@ class ReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             packets, path = self.fixture(root)
-            output = write_review(root, draft_path=path)
+            output = write_review(root, packet_directory="review", training_contract="Contract", draft_path=path)
             original = output.read_bytes()
             with self.assertRaises(FileExistsError):
-                write_review(root, draft_path=path)
+                write_review(root, packet_directory="review", training_contract="Contract", draft_path=path)
             self.assertEqual(output.read_bytes(), original)
             packets[0]['manifest']['split'] = 'test'
-            (root / 'data/packets/calibration/packet-set.json').write_text(json.dumps(packets))
-            with self.assertRaisesRegex(ValueError, 'development packets only'):
-                write_review(root)
+            (root / 'review/packet-set.json').write_text(json.dumps(packets))
+            with self.assertRaisesRegex(ValueError, 'training and development'):
+                write_review(root, packet_directory="review", training_contract="Contract")

@@ -6,8 +6,8 @@ import uuid
 
 from proxybench.execution.resources import durable_json, host_memory
 from proxybench.training.checkpoints import validate_checkpoint
-from proxybench.training.optimization import tensor_hash
-from proxybench.training.smoke import digest
+from proxybench.training.merge import tensor_hash
+from proxybench.training.adapters import digest
 
 
 def publish_merged(model, tokenizer, directory, expected_hashes, *, shard_bytes=256 * 1024**2):

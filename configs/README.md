@@ -1,21 +1,11 @@
-# Shared configuration
+# Portable configuration
 
-Store portable experiment configuration here.
-Keep credentials, personal SEC contact details, and machine-specific paths in ignored local files or environment variables.
-Record the effective configuration with each run.
+`training.json` records the supported training recipe.
+`inference.json` records the supported llama.cpp version and generation controls.
+`model-system-prompt.txt` contains the exact canonical prompt bytes.
+The requirement files pin the optional environments used by retained commands.
 
-The [Qwen3.5-4B configuration](qwen35-4b-smoke.json) defines the bounded adapter test.
-Its [dependency file](requirements-qwen35-4b-smoke.txt) records the isolated Python runtime.
-Read the [execution guide](../docs/qwen35-4b-smoke.md) before running a GPU phase.
-
-The [historical pilot configuration](qwen35-4b-historical-pilot.json) pins the accepted 96/24 release and 192-update recipe.
-It uses the existing local environment and a two-hour total GPU ceiling.
-The [pilot guide](../docs/qwen35-4b-historical-pilot.md) provides user-run commands and stop/resume instructions.
-
-The [expanded historical configuration](qwen35-4b-historical-expanded.json) pins accepted batch 18.
-It uses all 174 training examples and all 42 development examples.
-The [expanded guide](../docs/qwen35-4b-historical-expanded.md) gives the preparation, training, evaluation, and review commands.
-
-The older `qwen35-preparation.json` and `requirements-gpu-preparation.txt` describe the earlier 9B probe.
-They do not define the selected 4B test.
-Preserve them as records of earlier work.
+Keep environments, runtime binaries, base caches, and future runs outside the repository.
+Supply private SEC contact identity through runtime arguments or environment variables.
+Do not add personal email, credentials, or workstation paths to tracked configuration.
+Read the [training guide](../docs/training.md) and [inference guide](../docs/inference.md).

@@ -1,1 +1,1 @@
-"""Source-first review packets and annotation history."""
+"""Source display, editable labels, and explicit acceptance."""

@@ -8,7 +8,7 @@ import uuid
 
 from proxybench.execution.resources import durable_json
 from proxybench.training.checkpoints import validate_checkpoint
-from proxybench.training.smoke import digest, read_json
+from proxybench.training.adapters import digest, read_json
 
 
 def sample_order(count=96, epochs=2, seed=42):
@@ -151,7 +151,7 @@ def require_clean_stop(journal, checkpoint, identity):
 def train_updates(model, optimizer, order, loss_fn, journal_path, *, start=0, history=None,
                   stop=lambda: False, save=None, checkpoint_interval=48, before_update=None, after_update=None,
                   memory=lambda: {}, report=print, checkpoint_steps=()):
-    """Use this same loop for the pilot and the CPU resume equivalence test."""
+    """Train deterministic updates and preserve a clean resume boundary."""
     import torch
     history = list(history or [])
     begin = time.monotonic()
@@ -195,7 +195,7 @@ def train_updates(model, optimizer, order, loss_fn, journal_path, *, start=0, hi
         recent = weighted_loss(history[-12:])
         steps_here = completed-start
         eta = f'{sum(r["update_seconds"] for r in history[-12:])/min(12, len(history))*(len(order)-completed):.0f}s' if steps_here >= 4 else 'estimating'
-        report(f'step {completed:03}/{len(order)} | epoch {completed/(len(order)/2):.2f}/2 | '
+        report(f'step {completed:03}/{len(order)} | '
                f'loss {value:.5f} | recent loss {recent:.5f} | lr {optimizer.param_groups[0]["lr"]:g} | '
                f'elapsed {elapsed:.0f}s | training left ~{eta} | '
                f'allocated {row.get("allocated_bytes", 0)/1024**3:.2f} GiB | '

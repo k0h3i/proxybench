@@ -1,1 +1,1 @@
-"""Later supervision preparation and local fine-tuning."""
+"""Accepted datasets, model training, conversion, and promotion."""

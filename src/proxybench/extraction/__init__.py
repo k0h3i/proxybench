@@ -1,1 +1,1 @@
-"""Record segmentation, extraction, and mechanical validation."""
+"""Bounded local model inference and raw answer capture."""

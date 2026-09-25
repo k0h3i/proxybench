@@ -7,7 +7,7 @@ from proxybench.execution.resources import durable_json
 
 
 def validate_checkpoint(directory, expected=None, *, allow_temporary=False):
-    from proxybench.training.smoke import digest, read_json
+    from proxybench.training.adapters import digest, read_json
     directory = Path(directory)
     if '.incomplete-' in directory.name and not allow_temporary:
         raise ValueError('Checkpoint publication is incomplete')
@@ -31,7 +31,7 @@ def validate_checkpoint(directory, expected=None, *, allow_temporary=False):
 def publish_adapter(model, tokenizer, directory, identity=None):
     from peft import get_peft_model_state_dict
     from safetensors.torch import load_file
-    from proxybench.training.smoke import digest, require_same_adapter
+    from proxybench.training.adapters import digest, require_same_adapter
     directory = Path(directory)
     if directory.exists():
         raise FileExistsError(directory)

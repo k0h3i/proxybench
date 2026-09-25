@@ -46,14 +46,14 @@ class LiveSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             ledger = root/'ledger.jsonl'
-            ledger.write_text(json.dumps(dict(status='PHASE_TIMEOUT', phase='baseline',
+            ledger.write_text(json.dumps(dict(status='PHASE_TIMEOUT', phase='inference',
                                               elapsed_seconds=1800.1))+'\n')
             limits = dict(cpu_only=True, start_host_bytes=0, stop_host_bytes=0,
                           phase_seconds=None, total_seconds=None, sample_seconds=.05,
                           heartbeat_seconds=.05, grace_seconds=.3)
             script = "import os, time; assert 'PROXYBENCH_PHASE_DEADLINE' not in os.environ; assert 'PROXYBENCH_TOTAL_DEADLINE' not in os.environ; time.sleep(.15)"
             result = supervise([sys.executable, '-u', '-c', script], root/'worker', limits,
-                               ledger=ledger, phase='baseline', phase_used=1800.1, console=io.StringIO())
+                               ledger=ledger, phase='inference', phase_used=1800.1, console=io.StringIO())
             self.assertEqual(result, 'EXITED')
             self.assertEqual([entry['status'] for entry in ledger_entries(ledger)], ['PHASE_TIMEOUT', 'EXITED'])
             self.assertGreater((root/'worker/memory.jsonl').stat().st_size, 0)

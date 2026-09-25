@@ -8,7 +8,7 @@ import re
 from proxybench.annotation.bindings import canonical_bytes, sha256
 
 VIEW_VERSION = 'historical-cells-v1'
-PARTITIONS = {'training', 'development', 'legacy_development'}
+PARTITIONS = {'training', 'development'}
 
 
 class _Text(HTMLParser):
@@ -88,16 +88,21 @@ def source_block(raw, start, end, kind, encoding):
                 line_end=raw[:end - 1].count(b'\n') + 1)
 
 
-def prepare_historical(root, selection, policy):
+def prepare_historical(root, selection):
     """Build a packet from source-reviewed blocks and one target range.
 
     The selection supplies boundary evidence. This function does not infer it.
     Shared-row subtargets remain unsupported and must be deferred.
     """
     root = Path(root).resolve()
-    path = (root / selection['source_path']).resolve()
+    source_path = Path(selection['source_path'])
+    if source_path.is_absolute() or '..' in source_path.parts:
+        raise ValueError('Source path must be project-relative without parent traversal')
+    path = (root / source_path).resolve()
     if not path.is_relative_to(root):
         raise ValueError('Source path leaves the workspace')
+    if path.stat().st_size > 100 * 1024 ** 2:
+        raise ValueError('Source exceeds the 100 MiB input limit')
     raw = path.read_bytes()
     if sha256(raw) != selection['source_sha256']:
         raise ValueError('Source hash changed')
@@ -151,21 +156,21 @@ def prepare_historical(root, selection, policy):
         lines.append(gap)
         views.append('<p>' + html.escape(gap) + '</p>')
     source = '\n'.join(lines)
-    model_input = policy + '\n\nExtract only the marked target. Source cells follow in original order.\n\n' + source
+    model_input = source
     view = ('<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" '
             'content="default-src \'none\'; style-src \'unsafe-inline\'">'
             '<style>body{font:16px sans-serif}td{border:1px solid #aaa;padding:6px;white-space:pre-wrap}'
             'table{border-collapse:collapse}section{margin:15px 0}</style>' + ''.join(views))
     manifest = dict(selection, packet_version=VIEW_VERSION, blocks=blocks,
-                    policy_sha256=sha256(policy.encode()), view_version=VIEW_VERSION)
+                    view_version=VIEW_VERSION)
     manifest['target_id'] = sha256(canonical_bytes([selection['accession'], selection['source_sha256'], target]))
     return dict(manifest=manifest, source_view=view, model_input=model_input)
 
 
-def check_packet(root, packet, policy):
-    rebuilt = prepare_historical(root, packet['manifest'], policy)
+def check_packet(root, packet):
+    rebuilt = prepare_historical(root, packet['manifest'])
     if any(rebuilt[k] != packet[k] for k in ('manifest', 'source_view', 'model_input')):
-        raise ValueError('Packet differs from its original source or frozen policy')
+        raise ValueError('Packet differs from its original source or source rendering')
 
 
 def literal_support(label, packet):

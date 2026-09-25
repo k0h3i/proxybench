@@ -1,1 +1,1 @@
-"""Local development capture, replay, and execution."""
+"""Owned local processes and cumulative resource limits."""

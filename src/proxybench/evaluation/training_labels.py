@@ -5,7 +5,7 @@ import re
 
 from proxybench.training.labels import read_json, validate
 
-SCORER_VERSION = 'historical-pilot-v1'
+SCORER_VERSION = 'source-values-v1'
 
 
 def text(value, path):
@@ -110,59 +110,3 @@ def origin_tree(node, path):
             return dict(origin=node['origin'], children=origin_tree(node['value'], path))
         return {key: origin_tree(value, path+'.'+key) for key, value in node.items()}
     return None
-
-
-def terminal(answer):
-    if answer.get('status') == 'LENGTH_STOP':
-        return 'length'
-    return answer.get('status')
-
-
-def export_comparison(reference, candidate):
-    """Admit exact behavior, or request source review for narrowly allowed differences."""
-    if reference.get('prompt_token_ids') != candidate.get('prompt_token_ids'):
-        return dict(status='FAILED', reason='Prompt token IDs differ')
-    if terminal(reference) == 'length' or terminal(candidate) == 'length':
-        passed = terminal(reference) == terminal(candidate) and reference.get('token_ids') == candidate.get('token_ids')
-        return dict(status='PASS' if passed else 'FAILED', reason='Output limit comparison')
-    if reference.get('status') != 'COMPLETE' or candidate.get('status') != 'COMPLETE':
-        return dict(status='FAILED', reason='Incomplete request')
-    left, right = parse_answer(reference), parse_answer(candidate)
-    if left is None or right is None:
-        passed = left is None and right is None and reference['text'] == candidate['text']
-        return dict(status='PASS' if passed else 'FAILED', reason='Malformed output comparison')
-    # No origin/derivation changes are permitted for engine admission.
-    changed = []
-    for key in left['fields']:
-        a, b = left['fields'][key], right['fields'][key]
-        if normalized(a, key, origins=True, quotes=True) == normalized(b, key, origins=True, quotes=True):
-            continue
-        changed.append(key)
-        if origin_tree(a, key) != origin_tree(b, key):
-            return dict(status='FAILED', reason='Origin or structure differs')
-        if key != 'separate_subject' and normalized(a, key, origins=True) != normalized(b, key, origins=True):
-            return dict(status='FAILED', reason='Source value or multiplicity differs')
-        if key == 'separate_subject' and (a['availability'] != 'PRESENT' or b['availability'] != 'PRESENT'):
-            return dict(status='FAILED', reason='Subject availability differs')
-    return dict(status='REVIEW_REQUIRED' if changed else 'PASS', changed_fields=changed)
-
-
-def paired_report(cases):
-    """Keep all targets in the denominator, including malformed answers."""
-    def summary(rows):
-        result = dict(targets=len(rows), wins=0, losses=0, ties=0)
-        for model in ('original', 'trained'):
-            result[model] = {key: sum(bool(row[model][key]) for row in rows)
-                             for key in ('format_valid', 'exact', 'source_value_correct')}
-            result[model]['fields'] = {key: sum(row[model]['field_correct'][key] for row in rows)
-                                      for key in rows[0][model]['field_correct']} if rows else {}
-            for key in ('origin_errors', 'derivation_errors', 'unsupported_quotes', 'quotation_errors'):
-                result[model][key] = sum(len(row[model][key] or []) for row in rows)
-        for row in rows:
-            a, b = row['original']['source_value_correct'], row['trained']['source_value_correct']
-            result['ties' if a == b else 'wins' if b else 'losses'] += 1
-        return result
-    return dict(scorer=SCORER_VERSION, aggregate=summary(cases), cases=cases,
-                families={family: summary([r for r in cases if r['family'] == family])
-                          for family in sorted({r['family'] for r in cases})},
-                interpretation='Related development targets, not an independent test set')

@@ -1,6 +1,5 @@
 """Write a local review page with optional hidden assistant drafts."""
 
-import argparse
 import hashlib
 import html
 import json
@@ -8,12 +7,12 @@ from pathlib import Path
 import re
 
 from proxybench.annotation.bindings import review_binding
-from proxybench.annotation.packets import FIELDS
+from proxybench.training.labels import FIELDS
 
 
 TEMPLATE = r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ProxyBench · First calibration review</title>
+<title>ProxyBench · Training label review</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#edf1f3;color:#192b37;font:16px/1.5 system-ui,sans-serif}
 main{max-width:1200px;margin:24px auto;padding:0 22px}h1{font-size:28px;margin-bottom:8px}h2{font-size:22px}
@@ -23,15 +22,15 @@ input,textarea,select{width:100%;border:1px solid #8e9fab;border-radius:4px;padd
 textarea{min-height:68px;resize:vertical}label{display:block;margin:10px 0}input[type=checkbox]{width:auto}
 .card{background:white;border:1px solid #c9d3da;border-radius:8px;padding:20px;margin:16px 0}.bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .timer{font-variant-numeric:tabular-nums;margin-left:auto}.small{font-size:14px;color:#4c626f}.notice{border-left:4px solid #bb841f;padding-left:12px}
-iframe{width:100%;height:650px;border:1px solid #b5c2cb;background:white}nav{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}
+iframe{width:100%;height:820px;border:1px solid #b5c2cb;background:white}nav{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}
 nav button[aria-current=true]{background:#d7e8f0;border:2px solid #164c68}table.fields{width:100%;border-collapse:collapse;font-size:14px}
 .fields th{text-align:left}.fields td,.fields th{padding:9px 6px;vertical-align:top;border-bottom:1px solid #d4dde3}
 .fields td:first-child{width:16%}.fields td:nth-child(2){width:31%}.fields td:last-child{width:22%}fieldset{border:0;padding:0;margin:0}
 summary{cursor:pointer;color:#164c68}a{color:#164c68}#status{min-height:24px}#prior{max-width:110px}
 @media(max-width:750px){main{padding:0 10px}.card{padding:12px}.fields{display:block;overflow:auto}iframe{height:550px}}
-</style></head><body><main>
-<h1>First calibration review</h1>
-<p>Six source packets are ready. Read the yellow target and form your answer first. Then reveal the draft and revise it as needed.</p>
+.training-group{border:1px solid #c9d3da;border-radius:5px;padding:8px;margin:8px 0}.training-group legend{font-weight:600}.training-value label{font-size:13px}.training-item{border-bottom:2px solid #c9d3da;padding-bottom:10px;margin-bottom:12px}table.fields{min-width:1100px}.fields td:nth-child(2){min-width:310px}</style></head><body><main>
+<h1>Training label review</h1>
+<p>__COUNT__ source packets are ready. Read the yellow target and form your answer first. Then reveal the draft and revise it as needed.</p>
 <div class="card">
 <div class="bar"><button id="start" class="primary">Start review</button><button id="pause" disabled>Pause</button><button id="save">Download review draft</button><span id="timer" class="timer">00:00 / 30:00</span></div>
 <p class="small">Start the timer before reading the sources or guide. Pause for interruptions. This page pauses when you leave its browser tab.</p>
@@ -44,29 +43,10 @@ summary{cursor:pointer;color:#164c68}a{color:#164c68}#status{min-height:24px}#pr
 <div id="work" hidden>
 <nav id="nav" aria-label="Calibration packets"></nav>
 <section class="card"><h2 id="title"></h2><p id="admin" class="small"></p>
-<p class="notice">Label only the yellow target. Adjacent rows supply context. One target can continue across two rows.</p>
-<iframe id="source" title="Original source passages with one marked target" sandbox=""></iframe>
+<p class="notice">Review the highlighted proposal and its disclosed vote. The reporting fund appears alongside it.</p>
+<iframe id="source" title="Readable original filing passage" sandbox=""></iframe>
 <p id="locations" class="small"></p>
-<details><summary>Guide and field meanings</summary>
-<p>Reporting fund or fund group identifies whose voting record this is. Issuer name identifies the organization whose security is held.</p>
-<p>The issuer can also be a fund. Use the reporting heading to distinguish these roles.</p>
-<p>Evidence means the source location that supports a value.</p>
-<p>Preserve the original meeting date. For this pilot, interpret numeric dates as month/day/year or year-month-day when the year comes first.</p>
-<p>If both date orders remain possible, record the month/day interpretation separately as INFERRED. This pilot assumption is not an SEC-wide rule.</p>
-<p>Read the packet and form your answer before revealing the draft. You do not need to type your answer first.</p>
-<p>Compare the draft with the source. Agreement alone does not prove that either answer is correct.</p>
-<p>Keep identifiers and proposal numbers as strings. Keep unresolved evidence unresolved.</p>
-<p>Keep the answer value and original source wording in their separate boxes. For each vote component, include its direction, disclosed quantity, and disclosed management alignment.</p>
-<p>A vote component holds one direction and its disclosed details. Preserve multiple directions without inventing quantities.</p>
-<p>A blank cell does not establish an explicit absence. Keep packet absence separate from findings elsewhere in the original filing.</p>
-<p>Use PRESENT for a supported value, ABSENT_IN_CONTEXT for missing packet evidence, and AMBIGUOUS for multiple possible interpretations.</p>
-<p>Use UNREADABLE for illegible evidence, CONFLICTING for disagreeing disclosures, and NOT_APPLICABLE when the field does not apply.</p>
-<p>Use EXTRACTED for disclosed values, DERIVED for calculations, and INFERRED for added semantic interpretations. Leave origin blank for unresolved fields.</p>
-<p>Do not reconstruct a recommendation from management alignment. Do not expand a collective vote or fund group into individual records.</p>
-<p>Use block numbers and exact quotations for evidence. A source location alone does not prove that a value is supported.</p>
-<p>Leave untouched fields blank. Unreviewed fields are not missing-value labels. Keep difficult cases in the feedback box.</p>
-<p>These drafts inform the initial guide. They do not freeze the benchmark schema or become accepted reference labels automatically.</p>
-</details>
+<details><summary>Label contract and editing guide</summary><p>Edit the answer text directly. Fund details, identifiers, and vote components have separate labeled controls. Select No value for missing information. An empty text box with No value cleared means empty text.</p><p>Origin is EXTRACTED or DERIVED for present fields. Leave it blank for unresolved fields. The contract defines the explicit nonvoting exception.</p><p>Supporting quotations are review notes. No source coordinates are required. Review completion does not itself accept a label for training.</p><details><summary>Full label contract</summary><pre style="white-space:pre-wrap">__CONTRACT__</pre></details></details>
 </section>
 <section class="card"><h2>Compare and revise</h2>
 <div id="suggestion-controls" hidden>
@@ -76,25 +56,106 @@ summary{cursor:pointer;color:#164c68}a{color:#164c68}#status{min-height:24px}#pr
 <p class="small">Revealing fills untouched fields. Your existing answers stay in place, with the assistant draft shown beside them.</p>
 </div>
 <p id="draft-state" class="small">Fields remain blank until you reveal a draft or enter your own answers.</p>
-<fieldset id="form"><table class="fields"><thead><tr><th>Field</th><th>Answer value</th><th>Original source wording</th><th>Availability</th><th>Origin</th><th>Evidence: block and quotation</th></tr></thead><tbody id="fields"></tbody></table>
+<fieldset id="form"><table class="fields"><thead><tr><th>Field</th><th>Answer value</th><th>Original source wording</th><th>Availability</th><th>Origin</th><th>Supporting quotation or note</th></tr></thead><tbody id="fields"></tbody></table>
 <label>Feedback on the display, target boundary, or unresolved fields<textarea id="feedback"></textarea></label>
 <label><input id="reviewed" type="checkbox"> I finished reviewing this packet's fields.</label></fieldset>
 <p class="small">Download a draft when you stop. The download preserves fields, packet versions, and active review time.</p></section>
-</div><p class="small">All six examples remain development data. Review this first set before any further pilot packets.</p>
+</div><p class="small">Each packet shows its assigned partition. Download your corrections for exact acceptance before dataset export.</p>
 </main>
 <script id="packet-data" type="application/json">__PACKETS__</script>
 <script id="assistant-data" type="application/json">__DRAFTS__</script>
 <script>
 'use strict';
+const trainingSchema={"reporting_scope": {"type": "object", "fields": {"name": {"type": "text"}, "scope_type": {"type": "text", "choices": ["INDIVIDUAL_FUND", "FUND_GROUP"]}, "members": {"type": "list", "item": {"type": "text"}}}}, "series_identifiers": {"type": "list", "item": {"type": "object", "fields": {"source_label": {"type": "text"}, "value": {"type": "text"}}}}, "issuer_name": {"type": "text"}, "security_identifiers": {"type": "list", "item": {"type": "object", "fields": {"source_label": {"type": "text"}, "value": {"type": "text"}}}}, "ticker": {"type": "text"}, "meeting_date": {"type": "text"}, "meeting_type": {"type": "text"}, "proposal_number": {"type": "text"}, "raw_description": {"type": "text"}, "separate_subject": {"type": "text"}, "proposal_source": {"type": "text"}, "participation": {"type": "text", "choices": ["VOTED", "DID_NOT_VOTE", "OTHER"]}, "vote_components": {"type": "list", "item": {"type": "object", "fields": {"direction": {"type": "text", "choices": ["FOR", "AGAINST", "ABSTAIN", "WITHHOLD", "OTHER"]}, "quantity": {"type": "object", "fields": {"amount": {"type": "text"}, "unit": {"type": "text"}}}, "disclosed_management_alignment": {"type": "text", "choices": ["WITH_MANAGEMENT", "AGAINST_MANAGEMENT", "NOT_APPLICABLE", "OTHER"]}}}}, "management_recommendation": {"type": "text", "choices": ["FOR", "AGAINST", "ABSTAIN", "WITHHOLD", "OTHER", "NONE"]}};
+
+function trainingName(key){return key.replaceAll('_',' ').replace(/^./,s=>s.toUpperCase());}
+function trainingDisplay(text,property){
+ if(property!=='value'&&property!=='raw_text')return text||'(blank)';
+ if(text==='')return '(unreviewed)';
+ function describe(value){
+  if(value===null)return 'No value';
+  if(typeof value==='string')return value||'(empty text)';
+  if(Array.isArray(value))return value.length?value.map(describe).join('\n'):'No components';
+  if(Object.hasOwn(value,'availability'))return value.availability==='PRESENT'?describe(value.value):trainingName(value.availability.toLowerCase());
+  return Object.entries(value).map(([key,item])=>trainingName(key)+': '+describe(item)).join('\n');
+ }
+ try{return describe(JSON.parse(text));}catch{return 'Invalid saved value';}
+}
+function trainingControl(field,property){
+ const host=document.createElement('div');host.className='training-value';
+ const schema=property==='raw_text'?{type:'text'}:trainingSchema[field];
+ let value=null,untouched=true;
+ const notify=()=>{untouched=false;host.dispatchEvent(new Event('input',{bubbles:true}));};
+ const make=(tag,text)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
+ const emptyField=()=>({value:null,raw_text:null,availability:'ABSENT_IN_CONTEXT',origin:null});
+ function initial(spec){
+  if(spec.type==='object')return Object.fromEntries(Object.keys(spec.fields).map(key=>[key,emptyField()]));
+  if(spec.type==='list')return [];
+  return spec.choices?spec.choices[0]:'';
+ }
+ function select(parent,title,choices,current,change){
+  const label=make('label',title),control=make('select');
+  for(const choice of choices){const option=make('option',choice?trainingName(choice.toLowerCase()):'No origin');option.value=choice;control.append(option);}
+  control.value=current||'';control.oninput=event=>{event.stopPropagation();change(control.value);notify();};label.append(control);parent.append(label);
+ }
+ function nested(parent,title,spec,item){
+  const group=make('fieldset');group.className='training-group';group.append(make('legend',title));parent.append(group);
+  const body=make('div');group.append(body);
+  function draw(){
+   body.replaceChildren();
+   editor(body,spec,()=>item.value,v=>{item.value=v;});
+   select(body,'Availability',['PRESENT','ABSENT_IN_CONTEXT','AMBIGUOUS','UNREADABLE','CONFLICTING','NOT_APPLICABLE'],item.availability,v=>{
+    item.availability=v;if(v!=='PRESENT'){item.value=null;item.origin=null;}else if(item.value===null){item.value=initial(spec);item.origin='EXTRACTED';}draw();
+   });
+   select(body,'Origin',['','EXTRACTED','DERIVED'],item.origin,v=>{item.origin=v||null;});
+   const wording=make('details');wording.append(make('summary','Original wording'));body.append(wording);
+   editor(wording,{type:'text'},()=>item.raw_text,v=>{item.raw_text=v;});
+  }
+  draw();
+ }
+ function editor(parent,spec,get,set){
+  const box=make('div');parent.append(box);
+  function draw(){
+   box.replaceChildren();
+   const missing=make('label'),toggle=make('input');toggle.type='checkbox';toggle.checked=get()===null;
+   missing.append(toggle,make('span',' No value'));box.append(missing);
+   toggle.oninput=event=>{event.stopPropagation();set(toggle.checked?null:initial(spec));draw();notify();};
+   if(get()===null)return;
+   if(spec.type==='object'){
+    for(const [key,child] of Object.entries(spec.fields))nested(box,trainingName(key),child,get()[key]);
+   }else if(spec.type==='list'){
+    get().forEach((item,index)=>{
+     const row=make('div');row.className='training-item';box.append(row);
+     if(spec.item.type==='object'){
+      const title=make('p','Item '+(index+1));row.append(title);
+      for(const [key,child] of Object.entries(spec.item.fields))nested(row,trainingName(key),child,item[key]);
+     }else nested(row,'Member '+(index+1),spec.item,item);
+     const remove=make('button','Remove item');remove.type='button';remove.onclick=()=>{get().splice(index,1);draw();notify();};row.append(remove);
+    });
+    const add=make('button','Add item');add.type='button';add.onclick=()=>{get().push(spec.item.type==='object'?initial(spec.item):emptyField());draw();notify();};box.append(add);
+   }else if(spec.choices){select(box,'Value',spec.choices,get(),v=>set(v));}
+   else{
+    const input=make('textarea');input.value=get();input.setAttribute('aria-label',trainingName(field)+' '+(property==='raw_text'?'original wording':'value'));
+    input.oninput=event=>{event.stopPropagation();set(input.value);notify();};box.append(input);
+   }
+  }
+  draw();
+ }
+ Object.defineProperty(host,'value',{get:()=>untouched?'':JSON.stringify(value),set:text=>{
+  untouched=text==='';value=untouched?null:JSON.parse(text);host.replaceChildren();editor(host,schema,()=>value,v=>{value=v;});
+ }});
+ return host;
+}
+
 const packets=JSON.parse(document.getElementById('packet-data').textContent);
 const suggestions=JSON.parse(document.getElementById('assistant-data').textContent);
 const fieldNames=__FIELDS__;
 const fieldLabels={reporting_scope:'Reporting fund or fund group'};
 const availability=['','PRESENT','ABSENT_IN_CONTEXT','AMBIGUOUS','UNREADABLE','CONFLICTING','NOT_APPLICABLE'];
-const origins=['','EXTRACTED','DERIVED','INFERRED'];
+const origins=['','EXTRACTED','DERIVED'];
 const $=id=>document.getElementById(id);
-const key='proxybench-calibration-bound-v2:'+packets.map(p=>Object.values(p.review_binding).join(':')).join('|');
-let state={set_id:'calibration-first-v1',schema:'calibration-draft-v2',session_id:crypto.randomUUID(),revision:0,active_seconds:0,prior_review_minutes:0,session_started_at:null,events:[],packets:{}};
+const key='proxybench-training-review-v1:'+packets.map(p=>Object.values(p.review_binding).join(':')).join('|');
+let state={set_id:'source-label-review-v1',schema:'training-review-v1',session_id:crypto.randomUUID(),revision:0,active_seconds:0,prior_review_minutes:0,session_started_at:null,events:[],packets:{}};
 let current=0,running=false,last=0;
 for(const p of packets)state.packets[p.manifest.packet_id]={packet_id:p.manifest.packet_id,packet_version:p.manifest.packet_version,source_sha256:p.manifest.source_sha256,input_binding:p.review_binding,status:'unreviewed',fields:Object.fromEntries(fieldNames.map(f=>[f,{value:'',raw_text:'',availability:'',origin:'',evidence_input:''}])),feedback:'',reviewed:false,correction_history:[]};
 function sameBinding(actual,expected){return actual&&Object.keys(actual).length===Object.keys(expected).length&&Object.keys(expected).every(k=>actual[k]===expected[k]);}
@@ -121,16 +182,16 @@ function revealDraft(){
  state.events.push({type:'reveal',packet_id:id,at:a.revealed_at,active_seconds:state.active_seconds,suggestion_set_id:a.suggestion_set_id});
  persist();show(current);message('Draft revealed. Compare each answer with the source, then revise any disagreement.');
 }
-function show(index){current=index;const p=packets[index],id=p.manifest.packet_id,answer=state.packets[id];$('title').textContent=id+' · Source passage';$('admin').textContent='Accession '+p.manifest.accession+' · Packet version '+p.manifest.packet_version+' · Development data';const frame=document.createElement('iframe');frame.id='source';frame.title='Original source passages with one marked target';frame.setAttribute('sandbox','');frame.srcdoc=p.source_view;$('source').replaceWith(frame);$('locations').textContent=p.manifest.blocks.map(b=>b.block_id+': original lines '+b.line_start+'–'+b.line_end).join(' · ');$('fields').replaceChildren();
+function show(index){current=index;const p=packets[index],id=p.manifest.packet_id,answer=state.packets[id];$('title').textContent=id+' · Source passage';$('admin').textContent='Accession '+p.manifest.accession+' · Packet version '+p.manifest.packet_version+' · Partition: '+p.manifest.split;const frame=document.createElement('iframe');frame.id='source';frame.title='Readable original filing passage';frame.setAttribute('sandbox','');frame.srcdoc=p.source_view;$('source').replaceWith(frame);$('locations').textContent=p.manifest.blocks.map(b=>b.block_id+': original lines '+b.line_start+'–'+b.line_end).join(' · ');$('fields').replaceChildren();
  $('suggestion-controls').hidden=!suggestions.packets?.[id];$('source-read').checked=!!answer.source_read_at;$('source-read').disabled=!!answer.revealed_at;
  $('reveal').disabled=!answer.source_read_at||!!answer.revealed_at;$('reveal').textContent=answer.revealed_at?'Draft revealed':'Reveal draft labels';
  $('draft-state').textContent=answer.revealed_at?'The boxes contain your answers or the filled draft. Differences from the draft appear below the boxes.':'Draft labels are hidden. Read the source before revealing them.';
  for(const f of fieldNames){const row=document.createElement('tr');const name=document.createElement('td');name.textContent=fieldLabels[f]||f.replaceAll('_',' ');row.append(name);
- for(const [prop,options] of [['value',null],['raw_text',null],['availability',availability],['origin',origins],['evidence_input',null]]){const cell=document.createElement('td'),control=document.createElement(options?'select':'textarea');control.setAttribute('aria-label',f+' '+prop);if(options){for(const v of options){const o=document.createElement('option');o.value=v;o.textContent=v||(prop==='origin'?'No origin':'Unreviewed');control.append(o);}}control.value=answer.fields[f][prop];control.oninput=()=>{updateAnswer(answer,f,prop,control.value);$('reviewed').checked=false;persist();};cell.append(control);
- if(answer.revealed_at&&answer.assistant_draft){const draft=answer.assistant_draft.fields[f];const hint=document.createElement('p');hint.className='small';hint.style.whiteSpace='pre-wrap';hint.textContent='Draft: '+(draft[prop]||'(blank)');hint.hidden=answer.fields[f][prop]===draft[prop];cell.append(hint);const saveInput=control.oninput;control.oninput=()=>{saveInput();hint.hidden=control.value===draft[prop];};if(prop==='value'){if(draft.raw_text&&draft.raw_text!==draft.value){const raw=document.createElement('p');raw.className='small';raw.textContent='Source wording: '+draft.raw_text;cell.append(raw);}if(draft.note){const note=document.createElement('p');note.className='small';note.textContent='Draft note: '+draft.note;cell.append(note);}}}
+ for(const [prop,options] of [['value',null],['raw_text',null],['availability',availability],['origin',origins],['evidence_input',null]]){const cell=document.createElement('td'),control=(prop==='value'||prop==='raw_text')?trainingControl(f,prop):document.createElement(options?'select':'textarea');control.setAttribute('aria-label',f+' '+prop);if(options){for(const v of options){const o=document.createElement('option');o.value=v;o.textContent=v||(prop==='origin'?'No origin':'Unreviewed');control.append(o);}}control.value=answer.fields[f][prop];control.oninput=()=>{updateAnswer(answer,f,prop,control.value);$('reviewed').checked=false;persist();};cell.append(control);
+ if(answer.revealed_at&&answer.assistant_draft){const draft=answer.assistant_draft.fields[f];const hint=document.createElement('p');hint.className='small';hint.style.whiteSpace='pre-wrap';hint.textContent='Draft: '+trainingDisplay(draft[prop],prop);hint.hidden=answer.fields[f][prop]===draft[prop];cell.append(hint);const saveInput=control.oninput;control.oninput=()=>{saveInput();hint.hidden=control.value===draft[prop];};if(prop==='value'){if(draft.raw_text&&draft.raw_text!==draft.value){const raw=document.createElement('p');raw.className='small';raw.textContent='Source wording: '+trainingDisplay(draft.raw_text,'raw_text');cell.append(raw);}if(draft.note){const note=document.createElement('p');note.className='small';note.textContent='Draft note: '+draft.note;cell.append(note);}}}
  row.append(cell);}$('fields').append(row);}
  $('feedback').value=answer.feedback;$('reviewed').checked=answer.reviewed;for(const [i,b]of [...$('nav').children].entries())b.setAttribute('aria-current',String(i===index));}
-function exportDraft(){if(running)pause('Review paused and draft downloaded. Resume only if review time remains.');state.revision++;state.saved_at=new Date().toISOString();state.total_review_minutes=state.prior_review_minutes+state.active_seconds/60;state.status='user_draft_not_accepted_reference';state.review_workflow=Object.values(state.packets).some(a=>a.revealed_at)?'source_then_assistant_reveal':'source_first_manual';for(const a of Object.values(state.packets)){if(a.revealed_at&&a.assistant_draft){a.fields_changed_from_assistant=fieldNames.filter(f=>['value','raw_text','availability','origin','evidence_input'].some(k=>a.fields[f][k]!==a.assistant_draft.fields[f][k]));}}state.completed_packets=Object.values(state.packets).filter(p=>p.reviewed).length;persist();const blob=new Blob([JSON.stringify(state,null,2)+'\n'],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='proxybench-calibration-'+state.session_id+'-v'+state.revision+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function exportDraft(){if(running)pause('Review paused and draft downloaded. Resume only if review time remains.');state.revision++;state.saved_at=new Date().toISOString();state.total_review_minutes=state.prior_review_minutes+state.active_seconds/60;state.status='user_draft_not_accepted_reference';state.review_workflow=Object.values(state.packets).some(a=>a.revealed_at)?'source_then_assistant_reveal':'source_first_manual';for(const a of Object.values(state.packets)){if(a.revealed_at&&a.assistant_draft){a.fields_changed_from_assistant=fieldNames.filter(f=>['value','raw_text','availability','origin','evidence_input'].some(k=>a.fields[f][k]!==a.assistant_draft.fields[f][k]));}}state.completed_packets=Object.values(state.packets).filter(p=>p.reviewed).length;persist();const blob=new Blob([JSON.stringify(state,null,2)+'\n'],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='proxybench-training-review-'+state.session_id+'-v'+state.revision+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 function validateDraft(x){if(!x||typeof x!=='object'||Array.isArray(x))throw Error('The draft has invalid session metadata.');if(x.set_id!==state.set_id||x.schema!==state.schema||typeof x.session_id!=='string'||!Number.isFinite(x.active_seconds)||x.active_seconds<0||x.active_seconds>1800||!Number.isFinite(x.prior_review_minutes)||x.prior_review_minutes<0||x.prior_review_minutes>240||!Number.isInteger(x.revision)||!Array.isArray(x.events))throw Error('The draft has invalid session metadata.');if(!x.packets||typeof x.packets!=='object'||Array.isArray(x.packets)||Object.keys(x.packets).length!==packets.length||packets.some(p=>!Object.hasOwn(x.packets,p.manifest.packet_id)))throw Error('The draft does not match this packet set.');for(const p of packets){const a=x.packets?.[p.manifest.packet_id];if(!a||a.source_sha256!==p.manifest.source_sha256||a.packet_version!==p.manifest.packet_version||!sameBinding(a.input_binding,p.review_binding)||!Array.isArray(a.correction_history)||typeof a.feedback!=='string')throw Error('The draft does not match this packet set.');for(const f of fieldNames){const v=a.fields?.[f];if(!v||typeof v.value!=='string'||typeof v.raw_text!=='string'||typeof v.evidence_input!=='string'||!availability.includes(v.availability)||!origins.includes(v.origin))throw Error('The draft has an invalid field.');}
  if(typeof a.reviewed!=='boolean'||a.correction_history.some(c=>!c||typeof c!=='object'||Array.isArray(c)))throw Error('The draft has invalid review state.');
  if(a.reviewed&&(fieldNames.some(f=>!a.fields[f].availability)||a.correction_history.some(c=>typeof c.reason!=='string'||!c.reason.trim())))throw Error('The draft marks an incomplete packet reviewed.');
@@ -138,7 +199,11 @@ function validateDraft(x){if(!x||typeof x!=='object'||Array.isArray(x))throw Err
  }return x;}
 for(const [i,p]of packets.entries()){const b=document.createElement('button');b.textContent=p.manifest.packet_id;b.onclick=()=>show(i);$('nav').append(b);}
 $('feedback').oninput=()=>{state.packets[packets[current].manifest.packet_id].feedback=$('feedback').value;persist();};
-$('reviewed').onchange=()=>{const a=state.packets[packets[current].manifest.packet_id];if($('reviewed').checked&&a.correction_history.some(c=>!c.reason)){const reason=a.feedback.trim();if(!reason){message('Add a reason for your corrections in the feedback box before marking this packet reviewed.');$('reviewed').checked=false;return;}for(const c of a.correction_history)if(!c.reason)c.reason=reason;}if($('reviewed').checked&&fieldNames.some(f=>!a.fields[f].availability)){message('Some fields remain unreviewed. Record their availability or leave this packet unfinished.');$('reviewed').checked=false;return;}a.reviewed=$('reviewed').checked;a.status='user_draft';persist();};
+$('reviewed').onchange=()=>{const a=state.packets[packets[current].manifest.packet_id];
+ if($('reviewed').checked){try{for(const f of fieldNames){const v=a.fields[f];
+ JSON.parse(v.value);const raw=JSON.parse(v.raw_text);if(raw!==null&&typeof raw!=='string')throw Error(f+': original wording must be a JSON string or null.');
+ }}catch(error){$('reviewed').checked=false;message('Fix the JSON before completing review: '+error.message);return;}}
+if($('reviewed').checked&&a.correction_history.some(c=>!c.reason)){const reason=a.feedback.trim();if(!reason){message('Add a reason for your corrections in the feedback box before marking this packet reviewed.');$('reviewed').checked=false;return;}for(const c of a.correction_history)if(!c.reason)c.reason=reason;}if($('reviewed').checked&&fieldNames.some(f=>!a.fields[f].availability)){message('Some fields remain unreviewed. Record their availability or leave this packet unfinished.');$('reviewed').checked=false;return;}a.reviewed=$('reviewed').checked;a.status='user_draft';persist();};
 $('start').onclick=start;$('pause').onclick=()=>pause();$('save').onclick=exportDraft;
 $('source-read').onchange=()=>{const a=state.packets[packets[current].manifest.packet_id];if(a.revealed_at)return;a.source_read_at=$('source-read').checked?new Date().toISOString():null;$('reveal').disabled=!a.source_read_at;persist();};
 $('reveal').onclick=revealDraft;
@@ -148,6 +213,7 @@ window.addEventListener('beforeunload',()=>{if(running)tick();persist();});
 try{const saved=localStorage.getItem(key);if(saved){state=validateDraft(JSON.parse(saved));$('prior').value=state.prior_review_minutes;message('Browser draft restored. Resume the timer before reading or editing.');}}catch(e){message('No usable browser draft was restored. You can load a downloaded draft.');}
 updateTime();setInterval(tick,1000);
 </script></body></html>'''
+
 
 
 def load_suggestions(path, packets):
@@ -180,88 +246,23 @@ def load_suggestions(path, packets):
 
 
 def training_template(contract, count):
-    """Use readable controls while preserving structured labels in saved drafts."""
-    from proxybench.annotation.training_editor import SCRIPT
-    from proxybench.training.labels import TYPES
-
-    def descriptor(kind):
-        if kind is str:
-            return {'type': 'text'}
-        if isinstance(kind, tuple):
-            return {'type': 'text', 'choices': kind}
-        if isinstance(kind, dict):
-            return {'type': 'object', 'fields': {key: descriptor(value) for key, value in kind.items()}}
-        return {'type': 'list', 'item': descriptor(kind[0])}
-    template = TEMPLATE.replace('First calibration review', 'Training label review')
-    template = template.replace('Six source packets are ready.', f'{count} source packets are ready.')
-    template = template.replace('All six examples remain development data. Review this first set before any further pilot packets.',
-                                'Each packet shows its assigned partition. Download your corrections for exact acceptance before dataset export.')
-    template = template.replace("+' · Development data'", "+' · Partition: '+p.manifest.split")
-    start = template.index('<details><summary>Guide and field meanings</summary>')
-    end = template.index('</details>', start) + len('</details>')
-    guide = ('<details><summary>Label contract and editing guide</summary>'
-             '<p>Edit the answer text directly. Fund details, identifiers, and vote components have separate labeled controls. '
-             'Select No value for missing information. An empty text box with No value cleared means empty text.</p>'
-             '<p>Origin is EXTRACTED or DERIVED for present fields. Leave it blank for unresolved fields. '
-             'The contract defines the explicit nonvoting exception.</p>'
-             '<p>Supporting quotations are review notes. No source coordinates are required. '
-             'Review completion does not itself accept a label for training.</p>'
-             '<details><summary>Full label contract</summary><pre style="white-space:pre-wrap">' + html.escape(contract) + '</pre></details></details>')
-    template = template[:start] + guide + template[end:]
-    template = template.replace("const origins=['','EXTRACTED','DERIVED','INFERRED'];", "const origins=['','EXTRACTED','DERIVED'];")
-    template = template.replace("set_id:'calibration-first-v1',schema:'calibration-draft-v2'", "set_id:'direct-sol-labels-v1',schema:'training-review-v1'")
-    template = template.replace('proxybench-calibration-bound-v2:', 'proxybench-training-review-v1:')
-    template = template.replace('Evidence: block and quotation', 'Supporting quotation or note')
-    template = template.replace('Label only the yellow target. Adjacent rows supply context. One target can continue across two rows.',
-                                'Review the highlighted proposal and its disclosed vote. The reporting fund appears alongside it.')
-    template = template.replace('Original source passages with one marked target', 'Readable original filing passage')
-    template = template.replace('iframe{width:100%;height:650px;', 'iframe{width:100%;height:820px;')
-    template = template.replace("'proxybench-calibration-'", "'proxybench-training-review-'")
-    marker = "$('reviewed').onchange=()=>{const a=state.packets[packets[current].manifest.packet_id];"
-    guard = """
- if($('reviewed').checked){try{for(const f of fieldNames){const v=a.fields[f];
- JSON.parse(v.value);const raw=JSON.parse(v.raw_text);if(raw!==null&&typeof raw!=='string')throw Error(f+': original wording must be a JSON string or null.');
- }}catch(error){$('reviewed').checked=false;message('Fix the JSON before completing review: '+error.message);return;}}
-"""
-    template = template.replace(marker, marker + guard)
-    template = template.replace("control=document.createElement(options?'select':'textarea')",
-                                "control=(prop==='value'||prop==='raw_text')?trainingControl(f,prop):document.createElement(options?'select':'textarea')")
-    template = template.replace("(draft[prop]||'(blank)')", "trainingDisplay(draft[prop],prop)")
-    template = template.replace("'Source wording: '+draft.raw_text", "'Source wording: '+trainingDisplay(draft.raw_text,'raw_text')")
-    schema = json.dumps({key: descriptor(kind) for key, kind in TYPES.items()})
-    template = template.replace("'use strict';", "'use strict';\nconst trainingSchema=" + schema + ";\n" + SCRIPT)
-    template = template.replace('</style>', '.training-group{border:1px solid #c9d3da;border-radius:5px;padding:8px;margin:8px 0}'
-                                '.training-group legend{font-weight:600}.training-value label{font-size:13px}'
-                                '.training-item{border-bottom:2px solid #c9d3da;padding-bottom:10px;margin-bottom:12px}'
-                                'table.fields{min-width:1100px}.fields td:nth-child(2){min-width:310px}</style>')
-    return template
+    return TEMPLATE.replace('__CONTRACT__', html.escape(contract)).replace('__COUNT__', str(count))
 
 
-def write_review(root, *, draft_path=None, packet_directory="data/packets/calibration", training_contract=None):
+def write_review(root, *, packet_directory, training_contract, draft_path=None):
     root = Path(root)
     directory = root / packet_directory
     packets = json.loads((directory / 'packet-set.json').read_text(encoding='utf-8'))
     for packet in packets:
-        allowed = {'training', 'development', 'legacy_development'} if training_contract is not None else {'development'}
-        if packet['manifest'].get('split') not in allowed:
-            if training_contract is None:
-                raise ValueError('This pilot review page supports development packets only. Test review needs its separate source-only procedure.')
-            raise ValueError('This training review page excludes test packets. Test review needs its separate source-only procedure.')
+        if packet['manifest'].get('split') not in {'training', 'development'}:
+            raise ValueError('Only training and development sources can enter review')
         packet['review_binding'] = review_binding(packet)
     payload = json.dumps(packets, ensure_ascii=False).replace('<', '\\u003c')
     drafts = load_suggestions(draft_path, packets) if draft_path else {'packets': {}}
     draft_payload = json.dumps(drafts, ensure_ascii=False).replace('<', '\\u003c')
     substitutions = {'__PACKETS__': payload, '__FIELDS__': json.dumps(FIELDS), '__DRAFTS__': draft_payload}
-    template = training_template(training_contract, len(packets)) if training_contract is not None else TEMPLATE
+    template = training_template(training_contract, len(packets))
     page = re.sub(r'__PACKETS__|__FIELDS__|__DRAFTS__', lambda match: substitutions[match.group()], template)
     with (directory / 'index.html').open('x', encoding='utf-8') as stream:
         stream.write(page)
     return directory / 'index.html'
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--drafts', type=Path, help='Preserved assistant draft labels for this packet set.')
-    parser.add_argument('--packet-directory', default='data/packets/calibration', help='A new versioned review directory.')
-    args = parser.parse_args()
-    print(write_review(Path.cwd(), draft_path=args.drafts, packet_directory=args.packet_directory))

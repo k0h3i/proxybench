@@ -7,9 +7,7 @@ import unittest
 
 from proxybench.annotation.bindings import review_binding
 from proxybench.annotation.review import training_template
-from proxybench.training.labels import (TYPES, validate, to_review, from_review, source_text,
-                                        export_accepted, dumps, sha)
-from test_local_inputs import PRIMARY, ROW, votes
+from proxybench.training.labels import (TYPES, validate, to_review, from_review, dumps, sha)
 
 
 def field(value=None, *, state=None, origin=None):
@@ -59,11 +57,7 @@ class LabelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate(value)
 
-    def test_source_selects_target_and_keeps_primary_context(self):
-        source = source_text(PRIMARY, votes(ROW + ROW.replace('Élan', 'Neighbor')), index=0, input_id='one')
-        self.assertIn(PRIMARY.decode(), source)
-        self.assertIn('BEGIN MARKED TARGET\n' + ROW, source)
-        self.assertNotIn('Neighbor', source)
+    def test_readable_editor_escapes_contract(self):
         page = training_template('Contract <script>data</script>', 4)
         self.assertIn('4 source packets', page)
         self.assertNotIn("'INFERRED'", page)
@@ -73,46 +67,3 @@ class LabelTests(unittest.TestCase):
         self.assertIn('trainingControl(f,prop)', page)
         self.assertIn('trainingDisplay(draft[prop],prop)', page)
         self.assertNotIn('Values and original wording use JSON.', page)
-
-    def test_only_reviewed_explicitly_accepted_export_becomes_messages(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root/'review').mkdir()
-            (root/'one').mkdir()
-            (root/'one/draft.json').write_text(dumps(label()))
-            packet = dict(manifest=dict(packet_id='one', accession='filing', split='development'),
-                          source_view='<pre>source</pre>', model_input='contract + exact source')
-            (root/'review/packet-set.json').write_text(dumps([packet]))
-            answer = dict(reviewed=True, input_binding=review_binding(packet), fields=to_review(label()))
-            review = dict(schema='training-review-v1', packets={'one': answer})
-            path, receipt, output = root/'review.json', root/'approval.json', root/'labels.jsonl'
-            def save():
-                path.write_text(dumps(review))
-                approval = dict(decision='ACCEPTED', export_sha256=sha(path.read_bytes()),
-                                accepted_packet_ids=['one'], reviewer='user', accepted_at='2026-09-08')
-                receipt.write_text(dumps(approval))
-            save()
-            answer['reviewed'] = False
-            save()
-            with self.assertRaises(ValueError):
-                export_accepted(root, path, receipt, output)
-            self.assertFalse(output.exists())
-            answer['reviewed'] = True
-            save()
-            path.write_text(path.read_text()+' ')
-            with self.assertRaises(ValueError):
-                export_accepted(root, path, receipt, output)
-            save()
-            approval = json.loads(receipt.read_text())
-            approval['decision'] = 'REJECTED'
-            receipt.write_text(dumps(approval))
-            with self.assertRaises(ValueError):
-                export_accepted(root, path, receipt, output)
-            save()
-            self.assertEqual(export_accepted(root, path, receipt, output), 1)
-            messages = json.loads(output.read_text())['messages']
-            self.assertEqual(messages[0]['content'], packet['model_input'])
-            self.assertEqual(json.loads(messages[1]['content']), label())
-            self.assertNotIn('reviewer', messages[1]['content'])
-            with self.assertRaises(FileExistsError):
-                export_accepted(root, path, receipt, output)

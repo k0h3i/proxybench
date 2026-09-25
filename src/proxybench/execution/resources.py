@@ -10,7 +10,10 @@ import sys
 import time
 import uuid
 
-from proxybench.execution.runner import write_json
+def write_json(path, value):
+    with Path(path).open('x', encoding='utf-8') as stream:
+        json.dump(value, stream, ensure_ascii=False, allow_nan=False)
+        stream.write('\n')
 
 
 def durable_json(path, value):
@@ -76,7 +79,7 @@ def reconcile(ledger):
         if elapsed < 0:
             raise ValueError('Clock mismatch requires manual elapsed-time reconciliation')
         append_entry(ledger, dict(status='RECONCILED', execution_id=record['execution_id'],
-                                 elapsed_seconds=elapsed, run=record['run']))
+                                 elapsed_seconds=elapsed, run=record['run'], phase=record.get('phase')))
     active.unlink()
     ledger.with_suffix('.lock').unlink(missing_ok=True)
     return sum(entry['elapsed_seconds'] for entry in ledger_entries(ledger))
@@ -279,3 +282,14 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
+
+def reconcile_captures(root):
+    """Refuse retries while any earlier capture still owns live processes."""
+    root = Path(root)
+    for active in sorted(root.rglob('resources.active.json')):
+        reconcile(active.with_name('resources.jsonl'))
+    for lock in root.rglob('resources.lock'):
+        raise ValueError(f'Unresolved execution lock: {lock}')
+    return sum(row['elapsed_seconds'] for ledger in root.rglob('resources.jsonl')
+               for row in ledger_entries(ledger))

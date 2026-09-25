@@ -1,1 +1,1 @@
-"""Common scoring and recorded system comparisons."""
+"""Selected-model scoring and source-bound review decisions."""

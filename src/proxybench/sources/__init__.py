@@ -1,1 +1,1 @@
-"""Read local source documents."""
+"""Acquire and preserve complete original sources."""

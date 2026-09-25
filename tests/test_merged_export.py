@@ -15,7 +15,7 @@ class MergedExportTests(unittest.TestCase):
             self.skipTest('Optional model environment is unavailable')
         from proxybench.training.checkpoints import validate_checkpoint
         from proxybench.training.merged_export import publish_merged
-        from proxybench.training.optimization import tensor_hash
+        from proxybench.training.merge import tensor_hash
 
         class Config:
             architectures = ['Qwen3_5ForCausalLM']
