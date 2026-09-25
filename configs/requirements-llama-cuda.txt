@@ -1,0 +1,6 @@
+# Native CUDA 12 libraries for the Linux x64 llama.cpp build.
+# Install with --target as documented in docs/preparation.md.
+nvidia-cublas-cu12==12.8.5.5 \
+    --hash=sha256:9dfc0b26e565683cb15b7e273a0757ea4237948291036710a41e42207eba3e0b
+nvidia-cuda-runtime-cu12==12.8.90 \
+    --hash=sha256:adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90

@@ -3,7 +3,10 @@
 `training.json` records the supported training recipe.
 `inference.json` records the supported llama.cpp version and generation controls.
 `model-system-prompt.txt` contains the exact canonical prompt bytes.
-The requirement files pin the optional environments used by retained commands.
+`requirements-training.txt` pins Python model packages for `.venv/`.
+`requirements-llama-cuda.txt` pins CUDA 12 libraries for the native llama.cpp runtime.
+Install those libraries into a separate target through the [preparation guide](../docs/preparation.md).
+The guide also installs the llama.cpp executable, compiler, and required system libraries.
 
 Keep project Python packages in the root `.venv/`.
 Keep runtime binaries, base caches, and future runs outside the repository.

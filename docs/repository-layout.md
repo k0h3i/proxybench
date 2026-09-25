@@ -5,6 +5,7 @@ ProxyBench keeps reusable Python code under `src/proxybench/`.
 The package requires Python 3.11 or later and has no mandatory runtime dependencies.
 Project Python packages live in the `.venv/` at the repository root.
 Native runtimes, base-model caches, and run folders remain separate.
+Follow the [preparation guide](preparation.md) for their installation.
 
 | Area | Responsibility |
 |---|---|

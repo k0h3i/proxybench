@@ -2,12 +2,10 @@
 
 Training uses the private dataset and [portable recipe](../configs/training.json).
 The base model is `Qwen/Qwen3.5-4B`, revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`.
-Download that revision into an external cache.
-Install model libraries in the root `.venv/` with the [recorded dependencies](../configs/requirements-training.txt).
+Complete the [preparation guide](preparation.md) before model execution.
+It covers Python packages, the compiler, llama.cpp, native libraries, base weights, and private inputs.
+Export and evaluation of a new adapter also require the pending converter change in the [cleanup plan](environment-cleanup-plan.md).
 The user starts GPU commands.
-
-Environment migration is pending under the [environment cleanup plan](environment-cleanup-plan.md).
-The setup instructions below do not establish that installation or model loading passed.
 
 ## Recipe and inputs
 
@@ -92,34 +90,9 @@ Public release requires the separate [release gate](release.md).
 
 ## Preparation stage before GPU work
 
-The recorded optional environment uses Python 3.12.14.
-The implementing agent completes environment setup and CPU acceptance before handing over a GPU launch command.
-For a fresh clone, preparation includes installing llama.cpp and its required native libraries.
-An existing installation on the developer's machine does not satisfy that fresh-clone setup requirement.
-Use that Python version to create the root `.venv/`.
-Keep the interpreter and a working C/C++ compiler independent of disposable artifact directories.
-On Linux, the system `build-essential` package can provide the compiler.
-For a nonstandard compiler, set `CC` and `CXX` to its supported external paths.
-Keep the old environment and toolchain until their replacements pass acceptance.
-If `.venv/` exists, inspect it before installation and preserve unrelated work.
-
-```bash
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r configs/requirements-training.txt
-.venv/bin/python -m pip install -e .
-.venv/bin/python -m pip check
-CUDA_VISIBLE_DEVICES='' .venv/bin/python -m unittest discover -s tests -v
-```
-
-Do not copy the old virtual environment into the new location.
-Require the complete CPU suite to pass without missing-dependency skips.
-Install the [pinned native runtime](inference.md#external-runtime) before testing library resolution or preparing GGUF inference.
-Make sure that the compiler, native libraries, and pinned base snapshot work without old artifact paths.
-Populate and inspect the external base cache during preparation without loading the model onto a GPU.
-Keep dependency installation and readiness checks out of GPU launch commands.
-
-Before declaring preparation ready, make the old paths unavailable through reversible moves and repeat CPU acceptance.
-The [cleanup plan](environment-cleanup-plan.md) specifies the protected files, recovery steps, and deletion gate.
+Follow the [preparation guide](preparation.md) for installation and CPU acceptance.
+The implementing agent completes those steps before handing over a GPU command.
+For the current migration, also complete the isolation tests in the [cleanup plan](environment-cleanup-plan.md).
 Environment preparation does not change the source-labeling purpose of `.venv/bin/python -m proxybench prepare`.
 
 ## Bounded user-launched load command
@@ -131,7 +104,7 @@ The user starts this GPU work.
 ```bash
 export PROXYBENCH_BASE_CACHE="$HOME/.cache/proxybench/base-models"
 export PROXYBENCH_RUNTIME="$HOME/.local/share/proxybench/runtime/llama-329b6160"
-export PROXYBENCH_CUDA_LIB="/usr/local/lib/ollama/cuda_v12"
+export PROXYBENCH_CUDA_LIB="$PROXYBENCH_RUNTIME"
 .venv/bin/python -m proxybench validate-runtime --run-dir ../proxybench-runs/model-load-001
 ```
 
@@ -142,12 +115,10 @@ Before the test, make old run directories, base-model directories, and artifact 
 Use only `.venv/`, the independent native runtime, and the external base cache for this test.
 If either load fails, keep the protected originals and fix the supported path.
 
-For future conversion, place the converter source outside the repository:
+For future export, first complete the [converter preparation](preparation.md#obtain-converter-source-for-export), including its pending implementation change.
+Then run export with the prepared variables:
 
 ```bash
-git clone https://github.com/unslothai/llama.cpp.git ../proxybench-llama-cpp
-git -C ../proxybench-llama-cpp checkout 329b6160f513915f1c607dbfae3d5ce864a64a4f
-export PROXYBENCH_CONVERTER_SOURCE="$(realpath ../proxybench-llama-cpp)"
 .venv/bin/python -m proxybench export --adapter artifacts/models/ProxyType-4B/adapter --config configs/training.json --run-dir ../proxybench-runs/export-001
 ```
 
