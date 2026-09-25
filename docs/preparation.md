@@ -10,7 +10,7 @@ The user starts GPU work after preparation passes.
 
 The model environment uses Python 3.12.14 on x64 Linux or WSL2.
 The hardware target is an NVIDIA RTX 3090 with 24 GB of GPU memory.
-The commands below use Ubuntu 22.04 or 24.04.
+The commands below use Ubuntu 22.04, 24.04, or 26.04.
 Other platforms need a separately tested installation procedure.
 
 | Component | Required for | Installation or input |
