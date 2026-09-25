@@ -309,7 +309,6 @@ CUDA_VISIBLE_DEVICES='' .venv/bin/python -m unittest discover -s tests -v
 
 Require the complete CPU suite to pass without missing-dependency skips.
 Make sure that the declared inputs exist before preparing their model command.
-For cleanup acceptance, also complete the dataset, package, and isolated-path tests in the [cleanup plan](environment-cleanup-plan.md).
 Record the interpreter, package versions, runtime manifest, base revision, and CPU results.
 Installation failures leave preparation incomplete.
 

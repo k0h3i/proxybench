@@ -92,7 +92,6 @@ Public release requires the separate [release gate](release.md).
 
 Follow the [preparation guide](preparation.md) for installation and CPU acceptance.
 The implementing agent completes those steps before handing over a GPU command.
-For the current migration, also complete the isolation tests in the [cleanup plan](environment-cleanup-plan.md).
 Environment preparation does not change the source-labeling purpose of `.venv/bin/python -m proxybench prepare`.
 
 ## Bounded user-launched load command
