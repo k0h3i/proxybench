@@ -23,6 +23,7 @@ class LlamaCaptureTests(unittest.TestCase):
         self.assertEqual(assess_response([1, 8], terminal(), **kwargs), 'TERMINATION_MISMATCH')
         self.assertEqual(assess_response([1], terminal(), **kwargs), 'TOKEN_COUNT_MISMATCH')
         self.assertEqual(assess_response([1, 9], terminal(), **{**kwargs, 'elapsed': 61}), 'TIMEOUT')
+        self.assertEqual(assess_response([1, 9], terminal(), **{**kwargs, 'elapsed': 61, 'deadline': None}), 'COMPLETE')
         self.assertEqual(assess_response([1, 9], {**terminal(), 'stop_type': 'limit'},
                                         **{**kwargs, 'maximum': 2, 'forced': True}), 'PROBE_COMPLETE')
 
@@ -76,6 +77,10 @@ class LlamaCaptureTests(unittest.TestCase):
             self.assertEqual(result['maximum_observed_chunk_tokens'], 2)
             self.assertTrue(p.with_suffix('.response.bin').read_bytes().startswith(b'data: '))
             self.assertEqual(json.loads(p.with_suffix('.request.bin').read_bytes())['prompt'], [4, 5])
+            unbounded = generate(1, Tokenizer(), [4, 5], Path(directory) / 'unbounded.json',
+                                 index=1, deadline=None)
+            self.assertEqual(unbounded['status'], 'COMPLETE')
+            self.assertIsNone(unbounded['deadline_seconds'])
             Connection.chunks = [dict(tokens=[1, 9], stop=False)]
             result = generate(1, Tokenizer(), [4, 5], Path(directory) / 'incomplete.json', index=0)
             self.assertEqual(result['status'], 'CAPTURE_INCOMPLETE')

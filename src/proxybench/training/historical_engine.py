@@ -118,6 +118,7 @@ def normalize_engine_length(answer, path):
 def engine(root, name, output, config):
     from transformers import AutoTokenizer
     state = read_json((root/'state.json').read_bytes())
+    unbounded = state.get('resource_limits', {}).get('evaluation_unbounded') is True
     prepared = read_json((root/'prepared.json').read_bytes())
     kind = 'original' if name in ('original-panel', 'baseline') else 'trained'
     converted = read_json((phase_output(state, kind+'-conversion')/'complete.json').read_bytes())
@@ -148,7 +149,7 @@ def engine(root, name, output, config):
             while True:
                 if process.poll() is not None:
                     raise RuntimeError('Engine startup failed')
-                if time.monotonic()-begin >= engine_config['startup_seconds']:
+                if not unbounded and time.monotonic()-begin >= engine_config['startup_seconds']:
                     raise TimeoutError('Engine startup deadline')
                 try:
                     if json_request(port, '/health', timeout=1).get('status') == 'ok':
@@ -170,7 +171,7 @@ def engine(root, name, output, config):
                 prompt_messages = messages[:-1] if messages[-1]['role'] == 'assistant' else messages
                 rendered = tokenizer.apply_chat_template(prompt_messages,
                               tokenize=False, add_generation_prompt=True, enable_thinking=False)
-                require_prompt_tokens(port, rendered, prompt)
+                require_prompt_tokens(port, rendered, prompt, timeout=None if unbounded else 10)
                 agreements.append(dict(index=index, prompt_token_ids=prompt))
                 durable_json(output/'prompt-agreement.json', agreements)
                 path = output/f'answer-{index}.json'
@@ -192,8 +193,9 @@ def engine(root, name, output, config):
                     answer = candidate
                     break
                 if answer is None:
+                    deadline = None if unbounded else 60
                     answer = normalize_engine_length(generate(port, tokenizer, prompt, path, index=index,
-                                  maximum=1792, deadline=60), path)
+                                  maximum=1792, deadline=deadline), path)
                 if answer['status'] not in ('COMPLETE', 'LENGTH_STOP'):
                     raise ValueError('Engine request failed its deadline or capture contract')
                 timings.append(dict(index=index, seconds=answer['timing']['request_seconds'],

@@ -3,15 +3,21 @@
 from copy import deepcopy
 import json
 from pathlib import Path
+import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
 from proxybench.evaluation.pilot_review import accept_decisions, create_review, finish_report
-from proxybench.evaluation.system_admission import check_prefixes, ledger_prefixes
+from proxybench.evaluation.system_admission import (admit_timeout_recovery, check_prefixes,
+                                                   ledger_prefixes, saved_baseline_prefix, validate_evaluation)
 from proxybench.evaluation.system_labels import paired_report_system, score_system
-from proxybench.training.historical import admit_schedule, binding
+from proxybench.execution.resources import durable_json
+from proxybench.training.historical import admit_schedule, binding, inventory
+from proxybench.training.historical_engine import engine
 from proxybench.training.historical_run import launch
+from proxybench.training.smoke import digest
 from test_training_labels import field, label
 
 
@@ -200,6 +206,172 @@ class SystemEvaluationTests(unittest.TestCase):
                                                                dict(phase='baseline', elapsed_seconds=40)]),
                                       phase='baseline', operation=['baseline', 'final'])
             self.assertEqual(admitted['remaining']['baseline'], 1610)
+
+    def test_recovered_development_keeps_spent_time_without_a_ceiling(self):
+        state = dict(completed_phases={'training': {}, 'original-export': {},
+                                       'original-conversion': {}, 'trained-export': {},
+                                       'trained-conversion': {}},
+                     reservations={'baseline': None, 'final': None},
+                     resource_limits=dict(evaluation_unbounded=True, gpu_total=None, gpu_phase=None))
+        spent = dict(cpu=[], gpu=[dict(phase='training', elapsed_seconds=1463),
+                                  dict(phase='baseline', elapsed_seconds=1800.1)])
+        admitted = admit_schedule(state, spent, phase='baseline', operation=['baseline', 'final'])
+        self.assertAlmostEqual(admitted['used_seconds'], 3263.1)
+        self.assertAlmostEqual(admitted['phase_used_seconds'], 1800.1)
+        self.assertEqual(admitted['remaining'], {'baseline': None, 'final': None})
+        self.assertIsNone(admitted['time_ceiling_seconds'])
+
+    def test_timeout_recovery_requires_matching_saved_prompt_prefix(self):
+        prepared = dict(items=dict(development=[dict(input_ids=[1, 9], input_tokens=1),
+                                                dict(input_ids=[2, 9], input_tokens=1),
+                                                dict(input_ids=[3, 9], input_tokens=1)]))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = dict(index=0, status='COMPLETE', max_new_tokens=1792, prompt_token_ids=[1])
+            second = dict(index=1, status='STARTED', max_new_tokens=1792, prompt_token_ids=[2])
+            (root/'answer-0.json').write_text(json.dumps(first))
+            (root/'answer-1.json').write_text(json.dumps(second))
+            self.assertEqual(saved_baseline_prefix(root, prepared, 3), 1)
+            (root/'answer-0.json').write_text(json.dumps(dict(first, prompt_token_ids=[4])))
+            with self.assertRaisesRegex(ValueError, 'request identity'):
+                saved_baseline_prefix(root, prepared, 3)
+
+    def test_timeout_recovery_retries_after_admission_write_without_resetting_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root/'phases/baseline-01'
+            (output/'supervisor').mkdir(parents=True)
+            state = dict(status='FAILED', operation='separate', identity='run',
+                         failed_phase='baseline', supervisor_status='PHASE_TIMEOUT',
+                         active_phase='baseline', attempts={'baseline': 1},
+                         completed_phases={'training': dict(output='training', files={})},
+                         reservations={'baseline': 1650, 'final': 1650},
+                         resource_limits={'gpu_total': 14400, 'gpu_phase': 1800,
+                                          'stop_reserve': 1200, 'test_reserve': 3300})
+            durable_json(root/'state.json', state)
+            prepared = dict(items=dict(development=[dict(input_ids=[1, 9], input_tokens=1),
+                                                    dict(input_ids=[2, 9], input_tokens=1),
+                                                    dict(input_ids=[3, 9], input_tokens=1)]))
+            durable_json(root/'prepared.json', prepared)
+            for index, status in ((0, 'COMPLETE'), (1, 'STARTED')):
+                durable_json(output/f'answer-{index}.json',
+                             dict(index=index, status=status, max_new_tokens=1792,
+                                  prompt_token_ids=[index+1]))
+            result = dict(status='PHASE_TIMEOUT', execution_id='failed-attempt',
+                          elapsed_seconds=1800.1, surviving_owned_pids=[])
+            durable_json(output/'supervisor/result.json', result)
+            gpu_ledger = root/'gpu-ledger.jsonl'
+            before = json.dumps(dict(status='PHASE_TIMEOUT', phase='baseline',
+                                     execution_id='failed-attempt', elapsed_seconds=1800.1))+'\n'
+            gpu_ledger.write_text(before)
+            original = dict(schema='historical-system-development-v1', scorer='historical-system-v1',
+                            training_identity='run', training_commit='old',
+                            training_phase=state['completed_phases']['training'],
+                            evaluation_commit='old-eval', code={}, ledger_prefixes=ledger_prefixes(root))
+            durable_json(root/'evaluation-admission.json', original)
+            identity = dict(git_commit='old')
+            code = inventory(Path('src/proxybench').rglob('*.py'))
+            def read_training(_root, _config):
+                return identity, json.loads((root/'state.json').read_text())
+            def interrupted_write(path, value):
+                if Path(path).name == 'state.json':
+                    raise OSError('interrupted before state update')
+                durable_json(path, value)
+            with patch('proxybench.evaluation.system_admission.preserved_training', side_effect=read_training), \
+                 patch('proxybench.evaluation.system_admission.current_evaluation_code',
+                       return_value=(code, 'new-eval')):
+                with patch('proxybench.evaluation.system_admission.durable_json', side_effect=interrupted_write):
+                    with self.assertRaisesRegex(OSError, 'interrupted before state update'):
+                        admit_timeout_recovery(root, dict(development_examples=3))
+                self.assertEqual(json.loads((root/'state.json').read_text())['status'], 'FAILED')
+                recovered = admit_timeout_recovery(root, dict(development_examples=3))
+                self.assertEqual(recovered['complete_answers'], 1)
+                self.assertEqual(admit_timeout_recovery(root, dict(development_examples=3)), recovered)
+                validate_evaluation(root, dict(development_examples=3))
+            self.assertEqual(gpu_ledger.read_text(), before)
+            self.assertEqual(json.loads((root/'state.json').read_text())['status'], 'EVALUATION_PAUSED')
+
+    def test_recovered_engine_generates_only_missing_answers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old, new, converted = root/'old', root/'new', root/'converted'
+            for directory in (old, new, converted):
+                directory.mkdir()
+            model = converted/'model.gguf'
+            model.write_bytes(b'converted')
+            durable_json(converted/'complete.json', dict(status='COMPLETE', path=str(model), sha256=digest(model)))
+            items = [dict(input_ids=[index+1, 9], input_tokens=1) for index in range(3)]
+            rows = [dict(messages=[dict(role='user', content='source'),
+                                   dict(role='assistant', content='answer')]) for _ in items]
+            durable_json(root/'prepared.json', dict(items=dict(development=items), rows=dict(development=rows)))
+            saved = dict(index=0, status='COMPLETE', prompt_token_ids=[1], max_new_tokens=1792,
+                         token_ids=[9], format_valid=False, timing=dict(request_seconds=2))
+            durable_json(old/'answer-0.json', saved)
+            (old/'answer-0.tokens.jsonl').write_text('{"token_id":9}\n')
+            durable_json(old/'answer-1.json', dict(index=1, status='STARTED', prompt_token_ids=[2],
+                                                   max_new_tokens=1792))
+            old_files = inventory(old.iterdir())
+            durable_json(root/'state.json', dict(resource_limits=dict(evaluation_unbounded=True),
+                                                completed_phases={'original-conversion': dict(output=str(converted))},
+                                                partial_phases={'baseline': [dict(output=str(old), files=old_files)]}))
+            pin = root/'pin.json'
+            runtime = root/'engine.json'
+            durable_json(pin, dict(files={}, library_path=''))
+            durable_json(runtime, dict(server_arguments=[], startup_seconds=120))
+            class Tokenizer:
+                def apply_chat_template(self, *args, **kwargs):
+                    return 'rendered'
+            class Process:
+                returncode = None
+                pid = 12345
+                def __init__(self, command, **kwargs):
+                    kwargs['stdout'].write(b'offloaded 1/1 layers to GPU\n')
+                    kwargs['stdout'].flush()
+                def poll(self):
+                    return None
+                def terminate(self):
+                    self.returncode = 0
+                def wait(self, timeout=None):
+                    return 0
+                def kill(self):
+                    self.returncode = -9
+            class Socket:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return False
+                def bind(self, address):
+                    pass
+                def getsockname(self):
+                    return ('127.0.0.1', 12345)
+            generated = []
+            def generate_answer(port, tokenizer, prompt, path, *, index, **kwargs):
+                generated.append(index)
+                self.assertIsNone(kwargs['deadline'])
+                result = dict(index=index, status='COMPLETE', prompt_token_ids=prompt,
+                              max_new_tokens=1792, token_ids=[9], format_valid=True,
+                              timing=dict(request_seconds=2))
+                durable_json(path, result)
+                return result
+            fake_transformers = types.SimpleNamespace(AutoTokenizer=types.SimpleNamespace(
+                from_pretrained=lambda *args, **kwargs: Tokenizer()))
+            config = dict(runtime_pin=str(pin), engine_configuration=str(runtime),
+                          engine_root=str(root), development_examples=3)
+            with patch.dict(sys.modules, {'transformers': fake_transformers}), \
+                 patch('proxybench.training.historical_engine.socket.socket', return_value=Socket()), \
+                 patch('proxybench.training.historical_engine.subprocess.Popen', Process), \
+                 patch('proxybench.training.historical_engine.json_request', return_value={'status': 'ok'}), \
+                 patch('proxybench.training.historical_engine.require_prompt_tokens') as prompt_check, \
+                 patch('proxybench.training.historical_engine.generate', side_effect=generate_answer):
+                engine(root, 'baseline', new, config)
+            self.assertEqual(generated, [1, 2])
+            self.assertEqual(prompt_check.call_count, 3)
+            self.assertTrue(all(call.kwargs['timeout'] is None for call in prompt_check.call_args_list))
+            self.assertEqual((new/'answer-0.json').read_bytes(), (old/'answer-0.json').read_bytes())
+            self.assertEqual((new/'answer-0.tokens.jsonl').read_bytes(),
+                             (old/'answer-0.tokens.jsonl').read_bytes())
+            self.assertEqual(json.loads((old/'answer-1.json').read_text())['status'], 'STARTED')
+            self.assertEqual(json.loads((new/'complete.json').read_text())['status'], 'COMPLETE')
 
 
 if __name__ == '__main__':

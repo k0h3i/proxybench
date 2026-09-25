@@ -21,7 +21,7 @@ def request_body(prompt, maximum, forced):
 
 
 def assess_response(tokens, terminal, *, prompt_length, eos, maximum, forced, elapsed, deadline):
-    if elapsed > deadline:
+    if deadline is not None and elapsed > deadline:
         return 'TIMEOUT'
     if terminal is None or terminal.get('stop') is not True:
         return 'CAPTURE_INCOMPLETE'
@@ -51,8 +51,9 @@ def json_request(port, route, value=None, *, timeout=10):
         connection.close()
 
 
-def require_prompt_tokens(port, text, tokens):
-    response = json_request(port, '/tokenize', dict(content=text, add_special=False, parse_special=True))
+def require_prompt_tokens(port, text, tokens, *, timeout=10):
+    response = json_request(port, '/tokenize', dict(content=text, add_special=False, parse_special=True),
+                            timeout=timeout)
     if response.get('tokens') != tokens:
         raise ValueError('Server prompt token IDs differ from the saved Python prompt')
     return response
@@ -74,7 +75,7 @@ def generate(port, tokenizer, prompt, path, *, index, maximum=1792, forced=False
                    capture_policy='Flush each SSE line and token group; arrival times belong to chunks')
     durable_json(path, request)
     deadline_file = os.environ.get('PROXYBENCH_REQUEST_FILE')
-    if deadline_file:
+    if deadline_file and deadline is not None:
         durable_json(deadline_file, dict(request_path=str(path.resolve()), deadline_monotonic=started + deadline))
     connection = http.client.HTTPConnection('127.0.0.1', port, timeout=deadline)
     tokens, events, terminal, max_chunk_tokens = [], [], None, 0
@@ -85,11 +86,12 @@ def generate(port, tokenizer, prompt, path, *, index, maximum=1792, forced=False
             if response.status != 200:
                 raise ValueError(f'Generation HTTP {response.status}: {response.read(1000)!r}')
             while True:
-                remaining = started + deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError('Client request deadline')
-                if connection.sock is not None:
-                    connection.sock.settimeout(remaining)
+                if deadline is not None:
+                    remaining = started + deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError('Client request deadline')
+                    if connection.sock is not None:
+                        connection.sock.settimeout(remaining)
                 line = response.readline()
                 if not line:
                     break

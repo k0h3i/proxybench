@@ -10,7 +10,7 @@ import sys
 import time
 
 from proxybench.evaluation.pilot_review import accept_decisions, create_review, finish_report, require_decisions, source_text
-from proxybench.evaluation.system_admission import SCORER, admit_evaluation, validate_evaluation
+from proxybench.evaluation.system_admission import SCORER, admit_evaluation, admit_timeout_recovery, validate_evaluation
 from proxybench.evaluation.system_labels import source_cells
 from proxybench.execution.live import supervise
 from proxybench.execution.resources import durable_json, ledger_entries
@@ -82,9 +82,13 @@ def launch(root, config, configuration, action):
           if training else
           (f'Evaluation: original and trained models on the same '
            f'{config["development_examples"]} development examples.'), flush=True)
-    print(('Limits: 240 cumulative GPU minutes; training 100 minutes; other GPU phases 30 minutes.'
-           if config.get('profile') == 'historical-system-v1' else
-           'Limits: 120 cumulative GPU minutes, 60 CPU minutes, 30 minutes per phase.'), flush=True)
+    if config.get('profile') == 'historical-system-v1':
+        if state['resource_limits'].get('evaluation_unbounded') is True:
+            print('Development evaluation has no GPU time ceiling. Resource time remains recorded.', flush=True)
+        else:
+            print('Limits: 240 cumulative GPU minutes; training 100 minutes; other GPU phases 30 minutes.', flush=True)
+    else:
+        print('Limits: 120 cumulative GPU minutes, 60 CPU minutes, 30 minutes per phase.', flush=True)
     for name in phases:
         if name in state['completed_phases']:
             continue
@@ -104,7 +108,10 @@ def launch(root, config, configuration, action):
         try:
             limits = config['cpu_limits' if resource == 'cpu' else 'limits']
             if config.get('profile') == 'historical-system-v1' and resource == 'gpu' and name != 'training':
-                limits = dict(limits, phase_seconds=1800)
+                if state['resource_limits'].get('evaluation_unbounded') is True:
+                    limits = dict(limits, phase_seconds=None, total_seconds=None)
+                else:
+                    limits = dict(limits, phase_seconds=1800)
             elif config.get('profile') == 'historical-system-v1' and name == 'training':
                 limits = dict(limits, automatic_stop_margin_seconds=300)
             result = supervise(command, output/'supervisor', limits,
@@ -180,7 +187,8 @@ def status_report(root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['prepare', 'train', 'admit-evaluation', 'evaluate', 'resume', 'status', 'review', '_worker'])
+    parser.add_argument('action', choices=['prepare', 'train', 'admit-evaluation', 'admit-timeout-recovery',
+                                           'evaluate', 'resume', 'status', 'review', '_worker'])
     parser.add_argument('--configuration', type=Path, default=Path('configs/qwen35-4b-historical-pilot.json'))
     parser.add_argument('--run', type=Path, required=True)
     parser.add_argument('--reuse-prepared', action='store_true')
@@ -193,7 +201,7 @@ def main(argv=None):
     if (config.get('profile') == 'historical-system-v1' and args.action in ('evaluate', 'review')
             and not (root/'evaluation-admission.json').exists()):
         raise ValueError('System-profile evaluation awaits its separately tested scorer and admission path')
-    if args.action == 'admit-evaluation' and config.get('profile') != 'historical-system-v1':
+    if args.action in ('admit-evaluation', 'admit-timeout-recovery') and config.get('profile') != 'historical-system-v1':
         raise ValueError('Evaluation admission applies only to the historical system profile')
     if args.reuse_prepared and args.action != 'prepare':
         raise ValueError('--reuse-prepared applies only to CPU preparation')
@@ -236,6 +244,10 @@ def main(argv=None):
         elif args.action == 'admit-evaluation':
             admission = admit_evaluation(root, config)
             print(f'EVALUATION_READY: {root}. Scorer {admission["scorer"]}. No GPU worker started.', flush=True)
+        elif args.action == 'admit-timeout-recovery':
+            admission = admit_timeout_recovery(root, config)
+            print(f'EVALUATION_PAUSED: {root}. Saved {admission["complete_answers"]} answers; '
+                  'GPU time ceilings removed for development evaluation. No GPU worker started.', flush=True)
         elif args.action == 'review':
             if config.get('profile') == 'historical-system-v1':
                 _, state, _ = validate_evaluation(root, config)

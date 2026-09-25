@@ -324,6 +324,12 @@ def admit_schedule(state, entries, *, phase, operation=None):
              for n, r, _ in PHASES[index:] if r == resource}
     phase_used = spent[phase]
     limits = state.get('resource_limits', {})
+    if (resource == 'gpu' and phase in ('baseline', 'final')
+            and limits.get('evaluation_unbounded') is True):
+        return dict(resource=resource, used_seconds=used, phase_used_seconds=phase_used,
+                    remaining={n: None for n, r, _ in PHASES[index:] if r == resource
+                               and n not in state['completed_phases']},
+                    stop_reserve_seconds=None, time_ceiling_seconds=None)
     system_gpu = resource == 'gpu' and limits.get('training_phase') == 6000
     remaining = {n: (max(0, state['reservations'][n] - spent[n]) if system_gpu and n == phase
                      else state['reservations'][n]) for n, r, _ in PHASES[index:] if r == resource

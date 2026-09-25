@@ -93,7 +93,8 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
         raise ValueError('An execution ledger remains active')
     entries = ledger_entries(ledger)
     used = sum(e['elapsed_seconds'] for e in entries)
-    if used >= limits['total_seconds'] or phase_used >= limits['phase_seconds']:
+    if ((limits['total_seconds'] is not None and used >= limits['total_seconds'])
+            or (limits['phase_seconds'] is not None and phase_used >= limits['phase_seconds'])):
         raise ValueError('Execution budget is exhausted')
     cpu = limits.get('cpu_only', False)
     host = host_memory()
@@ -133,9 +134,15 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
         env = dict(os.environ, **(environment or {}),
                    PROXYBENCH_PHASE_FILE=str((output / 'phase.json').resolve()),
                    PROXYBENCH_REQUEST_FILE=str((output / 'request.json').resolve()),
-                   PROXYBENCH_STOP_FILE=str((output / 'stop.json').resolve()),
-                   PROXYBENCH_PHASE_DEADLINE=str(start + limits['phase_seconds'] - phase_used),
-                   PROXYBENCH_TOTAL_DEADLINE=str(start + limits['total_seconds'] - used))
+                   PROXYBENCH_STOP_FILE=str((output / 'stop.json').resolve()))
+        if limits['phase_seconds'] is not None:
+            env['PROXYBENCH_PHASE_DEADLINE'] = str(start + limits['phase_seconds'] - phase_used)
+        else:
+            env.pop('PROXYBENCH_PHASE_DEADLINE', None)
+        if limits['total_seconds'] is not None:
+            env['PROXYBENCH_TOTAL_DEADLINE'] = str(start + limits['total_seconds'] - used)
+        else:
+            env.pop('PROXYBENCH_TOTAL_DEADLINE', None)
         if cpu:
             env['CUDA_VISIBLE_DEVICES'] = ''
         durable_json(output / 'configuration.json', dict(command=command, limits=limits,
@@ -163,9 +170,9 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                     if phase_file.exists():
                         label = json.loads(phase_file.read_text())['phase']
                     reason = None
-                    if tick - start + used >= limits['total_seconds']:
+                    if limits['total_seconds'] is not None and tick - start + used >= limits['total_seconds']:
                         reason = 'AGGREGATE_TIMEOUT'
-                    if tick - start + phase_used >= limits['phase_seconds']:
+                    if limits['phase_seconds'] is not None and tick - start + phase_used >= limits['phase_seconds']:
                         reason = 'PHASE_TIMEOUT'
                     pending = output / 'request.json'
                     try:
@@ -197,8 +204,9 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                     if (margin and reason is None and not automatic_stop and not interruptions
                             and not (output / 'stop.json').exists()
                             and label in {'training', 'compilation', 'saving'}
-                            and min(limits['total_seconds']-used-(tick-start),
-                                    limits['phase_seconds']-phase_used-(tick-start)) <= margin):
+                            and any(deadline is not None and deadline <= margin for deadline in (
+                                None if limits['total_seconds'] is None else limits['total_seconds']-used-(tick-start),
+                                None if limits['phase_seconds'] is None else limits['phase_seconds']-phase_used-(tick-start)))):
                         automatic_stop = True
                         durable_json(output / 'stop.json', dict(requested_monotonic=tick,
                                                                  reason='TIME_BUDGET_MARGIN'))
@@ -231,8 +239,9 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                         break
                     if tick - last_beat >= limits.get('heartbeat_seconds', 15):
                         last_beat = tick
+                        ceiling = ('unbounded' if limits['total_seconds'] is None else f'{limits["total_seconds"]}s')
                         display.put(f'[{phase}: {label}] elapsed {tick-start:.0f}s | '
-                                    f'{"CPU" if cpu else "GPU"} total {used+tick-start:.0f}/{limits["total_seconds"]}s\n')
+                                    f'{"CPU" if cpu else "GPU"} total {used+tick-start:.0f}/{ceiling}\n')
                     time.sleep(.05)
     finally:
         if process is not None:
