@@ -1,8 +1,8 @@
 """Render optional training measurements without controlling worker execution."""
 
 import math
+from pathlib import Path
 import shutil
-import textwrap
 import time
 
 from proxybench.training.measurements import epoch_progress, parse_event
@@ -29,11 +29,19 @@ def _percent(fraction):
     return f'{fraction * 100:.1f}'.rstrip('0').rstrip('.') + '%'
 
 
+def _duration(seconds):
+    seconds = max(0, int(seconds))
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f'{hours}h{minutes:02d}m' if hours else f'{minutes}m{seconds:02d}s'
+
+
 class TrainingDisplay:
     """Keep display frequency separate from measurements and resource checks."""
 
     def __init__(self, write, *, tty=False, clock=time.monotonic, started=None,
-                 prior_seconds=0, phase_used=0, total_seconds=None, phase_seconds=None):
+                 prior_seconds=0, phase_used=0, total_seconds=None, phase_seconds=None,
+                 capture_path=None):
         self.write, self.tty, self.clock = write, tty, clock
         self.started = clock() if started is None else started
         self.prior_seconds, self.phase_used = prior_seconds, phase_used
@@ -49,6 +57,11 @@ class TrainingDisplay:
         self.finished = False
         self._stdout = b''
         self._frame_rows = 0
+        self.capture_path = Path(capture_path) if capture_path is not None else None
+        self._stderr = b''
+        self._batch_shown = None
+        self._last_phase_state = None
+        self._warnings = set()
 
     def _restore_counters(self, event):
         keys = ('global_step', 'sample_position', 'planned_updates', 'epoch_boundaries')
@@ -76,8 +89,6 @@ class TrainingDisplay:
             return
         if kind == 'phase' and (not isinstance(event.get('phase'), str) or event['phase'] not in PHASES):
             return
-        before = self.counters is not None
-        previous_step = self.data.get('global_step')
         restored = self._restore_counters(event) if kind in {'phase', 'update'} else False
         for key in ('batch_size', 'gradient_accumulation_steps', 'effective_batch_size',
                     'last_checkpoint', 'resume_eligible', 'loss', 'weighted_loss_12',
@@ -87,9 +98,10 @@ class TrainingDisplay:
         if kind == 'memory':
             self.memory.update(event)
         if kind == 'phase' and event.get('phase') in PHASES:
-            changed = self.phase != event['phase']
             self.phase = event['phase']
-            if changed or not before or restored and previous_step != self.data['global_step']:
+            state = (self.phase, self.data.get('global_step'), self.counters is not None)
+            if state != self._last_phase_state:
+                self._last_phase_state = state
                 self.render(immediate=True)
         elif kind == 'update' and restored:
             step = self.data['global_step']
@@ -173,15 +185,74 @@ class TrainingDisplay:
             return
         self.last_refresh = tick
         self.last_summary = self.data.get('global_step')
-        if self.tty and not immediate:
-            # Wrap explicitly so clearing a frame also clears wrapped terminal rows.
-            width = max(20, shutil.get_terminal_size((120, 24)).columns - 1)
-            rows = [row for line in (self.progress() + '\n' + self.details()).splitlines()
-                    for row in textwrap.wrap(line, width=width, replace_whitespace=False)]
+        self._last_phase_state = (self.phase, self.data.get('global_step'), self.counters is not None)
+        batch = tuple(self.data.get(key) for key in
+                      ('batch_size', 'gradient_accumulation_steps', 'effective_batch_size'))
+        if all(type(value) is int and value > 0 for value in batch) and batch != self._batch_shown:
+            self.message(f'Batch: {batch[0]} | Accumulation: {batch[1]} | Effective batch: {batch[2]}')
+            self._batch_shown = batch
+        rows = self.compact_rows()
+        if self.tty:
+            # One physical row per line. Long optional details cannot wrap and
+            # leave stale frames behind, including on immediate phase changes.
+            width = max(1, shutil.get_terminal_size((120, 24)).columns - 1)
+            rows = [row if len(row) <= width else row[:max(0, width - 1)] + '~' for row in rows]
             self.write(self._clear_frame() + '\n'.join(rows))
             self._frame_rows = len(rows)
         else:
-            self.write(self._clear_frame() + self.progress() + '\n' + self.details() + '\n')
+            self.write(' | '.join(rows) + '\n')
+
+    def compact_rows(self):
+        """Show useful values now; preserve the full contract in saved events."""
+        progress = self.phase.capitalize()
+        if self.counters is not None:
+            step, planned = self.data['global_step'], self.data['planned_updates']
+            fraction = step / planned
+            counter = self.counters
+            filled = int(fraction * 12)
+            bar = '[' + '=' * filled + '.' * (12 - filled) + '] ' if self.tty else ''
+            progress += f' {bar}{step}/{planned} updates ({_percent(fraction)})'
+            progress += (f' | Epoch {counter["epoch"]}/{counter["total_epochs"]}: '
+                         f'{_percent(counter["examples_completed"] / counter["examples_per_epoch"])} '
+                         f'({counter["examples_completed"]}/{counter["examples_per_epoch"]})')
+        rows = [progress]
+        metrics = [f'{label} {_value(self.data[key])}' for key, label in
+                   (('loss', 'loss'), ('weighted_loss_12', 'mean loss (12, response-weighted)'),
+                    ('learning_rate', 'lr'), ('gradient_norm', 'grad (pre-clip)'))
+                   if _number(self.data.get(key))]
+        if metrics:
+            rows.append(' | '.join(metrics))
+        throughput = self.data.get('throughput')
+        throughput = throughput if isinstance(throughput, dict) else {}
+        rates = [f'{label} {_value(throughput[key])}' for key, label in
+                 (('nonpadding_tokens_per_second', 'tokens/s'), ('supervised_tokens_per_second', 'response/s'))
+                 if _number(throughput.get(key))]
+        memory = [f'{label} {self.memory[key] / 1024**3:.2f} GiB' for key, label in
+                  (('allocated_bytes', 'GPU'), ('peak_allocated_bytes', 'peak'),
+                   ('peak_reserved_bytes', 'reserved peak'), ('free_device_bytes', 'free'))
+                  if _number(self.memory.get(key))]
+        if rates or memory:
+            rows.append(' | '.join(rates + memory))
+        elapsed = max(0, self.clock() - self.started)
+        times = [f'elapsed {_duration(elapsed)}']
+        remaining = [ceiling - prior - elapsed for ceiling, prior in (
+            (self.total_seconds, self.prior_seconds), (self.phase_seconds, self.phase_used))
+            if ceiling is not None]
+        if remaining:
+            times.append(f'budget {_duration(min(remaining))}')
+        checkpoint = self.data.get('last_checkpoint')
+        if isinstance(checkpoint, dict) and type(checkpoint.get('global_step')) is int:
+            times.append(f'saved {checkpoint["global_step"]}')
+        if self.data.get('resume_eligible') is True:
+            times.append('resume eligible')
+        eta = self.data.get('remaining_loop_seconds')
+        if self.phase == 'training':
+            times.append('loop ETA ' + (f'~{_duration(eta)}' if _number(eta) and eta >= 0 else 'estimating')
+                         + ' (publication extra)')
+        if self.prior_seconds:
+            times.append(f'charged {_duration(self.prior_seconds + elapsed)}')
+        rows.append(' | '.join(times))
+        return rows
 
     def tick(self):
         if self.tty:
@@ -213,12 +284,20 @@ class TrainingDisplay:
         event = parse_event(line)
         if event is not None:
             self.accept(event)
-        elif not line.startswith(('Phase: ', 'step ')):
+        elif line.startswith('Runtime identity differs or is incomplete.') and line not in self._warnings:
+            self._warnings.add(line)
             self.message(line)
+        # Library banners and progress bars remain in stdout.log. Only the
+        # supervisor and structured events own the visible training display.
+
+    def feed_stderr(self, chunk):
+        """Keep a bounded diagnostic tail; the capture retains every byte."""
+        self._stderr = (self._stderr + chunk)[-8192:]
 
     def finish(self, status):
         if self.finished:
             return
+        self.render(immediate=True)
         if status == 'EXITED' and self.result_published:
             self.message('Training complete. Final adapter and worker result are published.')
         elif status == 'EXITED' and self.worker_status == 'CLEAN_STOP':
@@ -228,4 +307,18 @@ class TrainingDisplay:
             self.message('Worker exited. Successful final publication was not confirmed.')
         else:
             self.message(f'Training did not complete. Supervisor status: {status}.')
+        if status != 'EXITED' or not (self.result_published or self.worker_status == 'CLEAN_STOP'):
+            if self.capture_path is not None:
+                try:
+                    with (self.capture_path / 'stderr.log').open('rb') as stream:
+                        stream.seek(0, 2)
+                        stream.seek(max(0, stream.tell() - 8192))
+                        self._stderr = stream.read(8192)
+                except OSError:
+                    pass
+            tail = '\n'.join(self._stderr.decode('utf-8', errors='replace').splitlines()[-12:])
+            if tail:
+                self.message(tail)
+            if self.capture_path is not None:
+                self.message(f'Worker diagnostics: {self.capture_path / "stderr.log"}')
         self.finished = True

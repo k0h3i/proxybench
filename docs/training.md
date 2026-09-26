@@ -57,7 +57,15 @@ Finalization retry and rollback require a separate recovery-policy decision.
 An optimizer update applies gradients to the trainable parameters.
 An epoch is one pass through the training examples.
 The display counts optimizer updates and derives epoch progress from the recorded sample position.
+
 The supervisor renders terminal progress and readable redirected summaries.
+The terminal uses up to four live lines and shows metrics only after measurements arrive.
+Batch settings appear once at startup or resume.
+Redirected output uses one line every ten updates, at epoch boundaries, and when the phase changes.
+
+Library banners and warnings remain in the worker capture logs, whose paths appear at startup.
+Resume identity warnings remain visible.
+If training fails, the supervisor also displays up to twelve final lines from the captured error output.
 Display refreshes do not change safety monitoring, journal writes, or checkpoint frequency.
 
 Worker events record preparation, loading, updates, checkpoint stages, and final publication.

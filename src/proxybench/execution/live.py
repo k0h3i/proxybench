@@ -116,14 +116,15 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
     start = time.monotonic()
     training = (TrainingDisplay(display.put, tty=bool(getattr(display.stream, 'isatty', lambda: False)()),
                                 started=start, prior_seconds=used, phase_used=phase_used,
-                                total_seconds=limits['total_seconds'], phase_seconds=limits['phase_seconds'])
+                                total_seconds=limits['total_seconds'], phase_seconds=limits['phase_seconds'],
+                                capture_path=output)
                 if phase in {'train', 'training'} else None)
 
     def show(chunk, *, stdout=False):
         if training and stdout:
             training.feed_stdout(chunk)
         elif training:
-            training.message(chunk.decode('utf-8', errors='replace'))
+            training.feed_stderr(chunk)
         else:
             display.put(chunk.decode('utf-8', errors='replace'))
 
@@ -153,6 +154,7 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
     sampler = None
     try:
         if training:
+            training.message(f'Worker logs: {output / "stdout.log"} and {output / "stderr.log"}')
             training.render(immediate=True)
         env = dict(os.environ, **(environment or {}),
                    PROXYBENCH_PHASE_FILE=str((output / 'phase.json').resolve()),

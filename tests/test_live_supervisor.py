@@ -209,6 +209,7 @@ print('clean stop saved', flush=True)
         script = """import sys
 from proxybench.training.measurements import MeasurementRecorder, event_line
 measurements = MeasurementRecorder(emit=lambda event: print(event_line(event), flush=True))
+print('Library banner: model loading', flush=True)
 measurements.phase('training', global_step=660, sample_position=660, planned_updates=660,
                    epoch_boundaries=[330, 660], batch_size=1,
                    gradient_accumulation_steps=1, effective_batch_size=1)
@@ -224,13 +225,15 @@ measurements.event('attempt', status='COMPLETE', result_published=True)
                                              expected_stderr=b'warning bytes: \xff\n')
         self.assertEqual(result, 'EXITED')
         self.assertIn('PROXYBENCH_EVENT', saved)
+        self.assertIn('Library banner: model loading', saved)
         self.assertIn('step 660/660 | loss 1', saved)
         text = stream.getvalue()
         self.assertNotIn('PROXYBENCH_EVENT', text)
         self.assertNotIn('step 660/660 | loss 1', text)
         self.assertNotIn('[train:', text)
-        self.assertIn('warning bytes:', text)
-        self.assertIn('Phase: publishing final adapter', text)
+        self.assertNotIn('warning bytes:', text)
+        self.assertNotIn('Library banner:', text)
+        self.assertIn('Publishing final adapter', text)
         self.assertIn('Training complete.', text)
 
     def test_training_failed_publication_does_not_report_success(self):
@@ -243,9 +246,78 @@ raise RuntimeError('publication failed')
 """
         result, _, _, _ = self.run_worker(script, phase='train', stream=stream)
         self.assertEqual(result, 'PROCESS_FAILED')
-        self.assertIn('660/660 (100%)', stream.getvalue())
+        self.assertIn('660/660 updates (100%)', stream.getvalue())
         self.assertNotIn('Training complete.', stream.getvalue())
         self.assertIn('Supervisor status: PROCESS_FAILED', stream.getvalue())
+        self.assertIn('RuntimeError: publication failed', stream.getvalue())
+        self.assertIn('stderr.log', stream.getvalue())
+
+    def test_training_failure_shows_bounded_stderr_tail_and_capture_path(self):
+        stream = io.StringIO()
+        noise = b'library banner\n' * 350000
+        tail = b'RuntimeError: synthetic failure\n'
+        stderr = noise + tail
+        script = ("import sys\nsys.stderr.buffer.write(b'library banner\\n' * 350000)\n"
+                  f'sys.stderr.buffer.write({tail!r})\nsys.stderr.flush()\nraise SystemExit(7)\n')
+        result, _, _, _ = self.run_worker(script, phase='train', stream=stream,
+                                          expected_stderr=stderr)
+        self.assertEqual(result, 'PROCESS_FAILED')
+        text = stream.getvalue()
+        self.assertIn('RuntimeError: synthetic failure', text)
+        self.assertIn('stderr.log', text)
+        self.assertLessEqual(text.count('library banner'), 12)
+        self.assertLess(len(text), 10000)
+
+    def test_worker_reported_failure_shows_diagnostics_even_with_zero_exit(self):
+        stream = io.StringIO()
+        script = """import sys
+from proxybench.training.measurements import MeasurementRecorder, event_line
+measurements = MeasurementRecorder(emit=lambda event: print(event_line(event), flush=True))
+sys.stderr.write('Worker validation failed\\n')
+measurements.event('attempt', status='FAILED')
+"""
+        result, _, _, _ = self.run_worker(script, phase='train', stream=stream,
+                                          expected_stderr=b'Worker validation failed\n')
+        self.assertEqual(result, 'EXITED')
+        self.assertIn('Worker validation failed', stream.getvalue())
+        self.assertIn('stderr.log', stream.getvalue())
+        self.assertNotIn('Training complete.', stream.getvalue())
+
+    def test_training_tty_refreshes_before_phase_change_with_long_heartbeat(self):
+        class Terminal(io.StringIO):
+            def __init__(self):
+                super().__init__()
+                self.frames = []
+
+            def isatty(self):
+                return True
+
+            def write(self, value):
+                self.frames.append((time.monotonic(), value))
+                return super().write(value)
+
+        stream = Terminal()
+        script = """import time
+from proxybench.training.measurements import MeasurementRecorder, event_line
+measurements = MeasurementRecorder(emit=lambda event: print(event_line(event), flush=True))
+measurements.phase('training', global_step=0, sample_position=0, planned_updates=660,
+                   epoch_boundaries=[330, 660])
+time.sleep(.15)
+measurements.event('update', global_step=1, sample_position=1, loss=.75)
+time.sleep(2)
+measurements.phase('saving checkpoint')
+"""
+        result, _, _, _ = self.run_worker(script, phase='train', stream=stream,
+                                          limits={'heartbeat_seconds': 180})
+        self.assertEqual(result, 'EXITED')
+        initial_at = next(at for at, frame in stream.frames if '0/660' in frame)
+        save_at = next(at for at, frame in stream.frames if 'Saving checkpoint' in frame)
+        updates = [(at, frame) for at, frame in stream.frames
+                   if '1/660' in frame and at < save_at]
+        self.assertTrue(updates, 'An ordinary update must appear while training is still active')
+        self.assertLess(updates[0][0] - initial_at, 1.6)
+        self.assertIn('loss 0.75', updates[0][1])
+        self.assertIn('\x1b[2K', updates[0][1])
 
     def test_malformed_training_measurements_preserve_worker_and_original_output(self):
         from proxybench.training.measurements import EVENT_PREFIX, EVENT_SCHEMA, event_line
@@ -263,7 +335,7 @@ raise RuntimeError('publication failed')
         result, _, _, record = self.run_worker(script, phase='train', stream=stream, expected_stdout=wire)
         self.assertEqual(result, 'EXITED')
         self.assertEqual(record['returncode'], 0)
-        self.assertIn('loss unavailable', stream.getvalue())
+        self.assertNotIn('loss unavailable', stream.getvalue())
         self.assertIn('Training complete.', stream.getvalue())
 
     def test_training_saving_phase_keeps_budget_stop_and_slow_terminal_is_bounded(self):
