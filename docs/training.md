@@ -9,7 +9,7 @@ The user starts GPU commands.
 
 ## Recipe and inputs
 
-The retained final model completed 660 updates over two epochs with seed 42.
+The retained final model completed 660 updates over two epochs.
 The recipe uses batch size 1, accumulation 1, learning rate 0.0001, zero weight decay, and gradient clipping at 1.0.
 LoRA trains small weight changes while the base model stays fixed.
 Its rank is 8, alpha is 16, and dropout is zero.

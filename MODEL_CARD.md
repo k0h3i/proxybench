@@ -7,7 +7,7 @@ The output combines source values with standardized labels under the [label cont
 ## Model and training
 
 The base model is `Qwen/Qwen3.5-4B` at revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`.
-The retained final adapter completed 660 updates over 330 training examples, with two epochs and seed 42.
+The retained final adapter completed 660 updates over 330 training examples, with two epochs.
 LoRA stores learned weight changes separately from the base model.
 The recipe uses rank 8, alpha 16, zero dropout, batch size 1, and learning rate 0.0001.
 See [configs/training.json](configs/training.json) for the full recipe.
