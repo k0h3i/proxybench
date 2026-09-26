@@ -18,7 +18,7 @@ from proxybench.execution.resources import group_members, ledger_entries
 
 class LiveSupervisorTests(unittest.TestCase):
     def run_worker(self, script, *, limits=None, stream=None, phase='test', expected_stderr=None,
-                   expected_stdout=None):
+                   expected_stdout=None, progress=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             settings = dict(cpu_only=True, start_host_bytes=0, stop_host_bytes=0, sample_seconds=.1,
@@ -26,7 +26,8 @@ class LiveSupervisorTests(unittest.TestCase):
             settings.update(limits or {})
             began = time.monotonic()
             result = supervise([sys.executable, '-u', '-c', script], root/'worker', settings,
-                               ledger=root/'ledger.jsonl', phase=phase, console=stream or io.StringIO())
+                               ledger=root/'ledger.jsonl', phase=phase, console=stream or io.StringIO(),
+                               progress=progress)
             elapsed = time.monotonic()-began
             saved = (root/'worker/stdout.log').read_text()
             if expected_stdout is not None:
@@ -49,6 +50,96 @@ class LiveSupervisorTests(unittest.TestCase):
         self.assertEqual(result, 'EXITED')
         self.assertIn('step 001/192', saved)
         self.assertIn('step 002/192', stream.getvalue())
+
+    def test_operation_output_stays_in_logs_with_compact_completion(self):
+        stdout = b'Synthetic library banner\n'
+        stderr = b'Synthetic library warning: \xff\n'
+        for operation in ('export', 'convert', 'evaluation'):
+            with self.subTest(operation=operation):
+                stream = io.StringIO()
+                script = f"""import os, sys
+from proxybench.execution.resources import durable_json
+sys.stdout.buffer.write({stdout!r})
+sys.stdout.flush()
+sys.stderr.buffer.write({stderr!r})
+sys.stderr.flush()
+durable_json(os.environ['PROXYBENCH_PHASE_FILE'],
+             dict(phase='cleanup', completed=3, total=3, failed=0))
+"""
+                result, _, _, _ = self.run_worker(
+                    script, phase=operation, stream=stream,
+                    expected_stdout=stdout, expected_stderr=stderr)
+                self.assertEqual(result, 'EXITED')
+                text = stream.getvalue()
+                self.assertNotIn('Synthetic library', text)
+                self.assertNotIn(f'[{operation}:', text)
+                self.assertIn('Cleanup 3/3 (100%) | generation failures 0', text)
+                if operation == 'evaluation':
+                    self.assertIn('Generation finished. Scoring and review are pending.', text)
+                else:
+                    self.assertIn(f'{operation.capitalize()} worker finished.', text)
+                    self.assertNotIn('published', text)
+
+    def test_operation_failure_keeps_status_counts_and_diagnostics(self):
+        for operation in ('export', 'convert', 'evaluation'):
+            with self.subTest(operation=operation):
+                stream = io.StringIO()
+                script = """import os, sys
+from proxybench.execution.resources import durable_json
+print('Hidden library banner', flush=True)
+sys.stderr.write('Synthetic operation failure\\n')
+sys.stderr.flush()
+durable_json(os.environ['PROXYBENCH_PHASE_FILE'],
+             dict(phase='cleanup', completed=1, total=3, failed=1))
+raise SystemExit(7)
+"""
+                result, saved, _, record = self.run_worker(
+                    script, phase=operation, stream=stream,
+                    expected_stderr=b'Synthetic operation failure\n')
+                self.assertEqual(result, 'PROCESS_FAILED')
+                self.assertEqual(record['returncode'], 7)
+                self.assertIn('Hidden library banner', saved)
+                text = stream.getvalue()
+                self.assertNotIn('Hidden library banner', text)
+                self.assertIn('1/3 (33.3%) | generation failures 1', text)
+                self.assertIn('Supervisor status: PROCESS_FAILED', text)
+                self.assertIn('Synthetic operation failure', text)
+                self.assertIn('stderr.log', text)
+                self.assertNotIn('worker finished', text)
+                self.assertNotIn('Generation finished', text)
+
+    def test_evaluation_zero_exit_does_not_claim_missing_results_are_finished(self):
+        stream = io.StringIO()
+        script = """import os
+from proxybench.execution.resources import durable_json
+durable_json(os.environ['PROXYBENCH_PHASE_FILE'],
+             dict(phase='cleanup', completed=2, total=3, failed=1))
+"""
+        result, _, _, _ = self.run_worker(script, phase='evaluation', stream=stream)
+        self.assertEqual(result, 'EXITED')
+        text = stream.getvalue()
+        self.assertIn('2/3 (66.7%) | generation failures 1', text)
+        self.assertIn('Generation incomplete', text)
+        self.assertNotIn('Generation finished', text)
+        self.assertIn('Worker diagnostics:', text)
+        self.assertIn('answers/server.log', text)
+
+    def test_evaluation_progress_adds_prior_results_and_retains_failure_count(self):
+        stream = io.StringIO()
+        script = """import os
+from proxybench.execution.resources import durable_json
+durable_json(os.environ['PROXYBENCH_PHASE_FILE'],
+             dict(phase='cleanup', completed=3, total=3, failed=1))
+"""
+        result, _, _, _ = self.run_worker(
+            script, phase='evaluation', stream=stream,
+            progress=dict(completed=2, total=5, failed=1))
+        self.assertEqual(result, 'EXITED')
+        text = stream.getvalue()
+        self.assertIn('Loading 2/5 (40%) | generation failures 1', text)
+        self.assertIn('Cleanup 5/5 (100%) | generation failures 2', text)
+        self.assertIn('Generation finished. Scoring and review are pending.', text)
+        self.assertNotIn('Evaluation complete', text)
 
     def test_unbounded_time_keeps_ledger_and_memory_monitor(self):
         with tempfile.TemporaryDirectory() as tmp:

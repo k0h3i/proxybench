@@ -16,6 +16,7 @@ from proxybench.execution.resources import (
     ledger_entries, process_memory,
 )
 from proxybench.execution.training_display import TrainingDisplay
+from proxybench.execution.operation_display import OperationDisplay
 
 
 SAFE_STOP_PHASES = frozenset({'training', 'compilation', 'saving', 'saving checkpoint',
@@ -86,7 +87,7 @@ class MemorySampler:
 
 
 def supervise(command, output, limits, *, ledger, phase, phase_used=0,
-              console=None, environment=None):
+              console=None, environment=None, progress=None):
     """Keep phase and aggregate clocks through retries, labels, and stops.
 
     Workers receive a stop-file path. Only a worker's verified safe checkpoint
@@ -119,17 +120,24 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                                 total_seconds=limits['total_seconds'], phase_seconds=limits['phase_seconds'],
                                 capture_path=output)
                 if phase in {'train', 'training'} else None)
+    operation = (OperationDisplay(display.put, operation=phase, capture_path=output,
+                                  tty=bool(getattr(display.stream, 'isatty', lambda: False)()),
+                                  started=start, prior_seconds=used, phase_used=phase_used,
+                                  total_seconds=limits['total_seconds'], phase_seconds=limits['phase_seconds'],
+                                  progress=progress)
+                 if phase in {'evaluation', 'export', 'convert'} else None)
+    presentation = training or operation
 
     def show(chunk, *, stdout=False):
-        if training and stdout:
-            training.feed_stdout(chunk)
-        elif training:
-            training.feed_stderr(chunk)
+        if presentation and stdout:
+            presentation.feed_stdout(chunk)
+        elif presentation:
+            presentation.feed_stderr(chunk)
         else:
             display.put(chunk.decode('utf-8', errors='replace'))
 
     def message(text):
-        (training.message if training else display.put)(text)
+        (presentation.message if presentation else display.put)(text)
 
     record = dict(execution_id=uuid.uuid4().hex, run=str(output.resolve()), phase=phase,
                   supervisor_pid=os.getpid(), started_monotonic=start, started_wall=time.time(),
@@ -153,9 +161,9 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
     minimum_free = device.get('free_bytes')
     sampler = None
     try:
-        if training:
-            training.message(f'Worker logs: {output / "stdout.log"} and {output / "stderr.log"}')
-            training.render(immediate=True)
+        if presentation:
+            presentation.message(f'Worker logs: {output / "stdout.log"} and {output / "stderr.log"}')
+            presentation.render(immediate=True)
         env = dict(os.environ, **(environment or {}),
                    PROXYBENCH_PHASE_FILE=str((output / 'phase.json').resolve()),
                    PROXYBENCH_REQUEST_FILE=str((output / 'request.json').resolve()),
@@ -184,8 +192,11 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                 while True:
                     tick = time.monotonic()
                     if interruptions > acknowledged:
-                        message('Stop requested. Saving at a safe boundary, at most 30 seconds.\n'
-                                if interruptions == 1 else 'Second interrupt. Stopping the owned processes now.\n')
+                        first_stop = ('Stop requested. Saving at a safe boundary, at most 30 seconds.\n'
+                                      if label in SAFE_STOP_PHASES else
+                                      'Stop requested. Stopping the owned processes.\n')
+                        message(first_stop if interruptions == 1 else
+                                'Second interrupt. Stopping the owned processes now.\n')
                         acknowledged = interruptions
                     for reader in (out, err):
                         chunk = reader.read(65536)
@@ -193,7 +204,10 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                             show(chunk, stdout=reader is out)
                     phase_file = output / 'phase.json'
                     if phase_file.exists():
-                        label = json.loads(phase_file.read_text())['phase']
+                        phase_state = json.loads(phase_file.read_text())
+                        label = phase_state['phase']
+                        if operation:
+                            operation.observe(phase_state)
                     reason = None
                     if limits['total_seconds'] is not None and tick - start + used >= limits['total_seconds']:
                         reason = 'AGGREGATE_TIMEOUT'
@@ -262,8 +276,8 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                                     break
                                 show(chunk, stdout=reader is out)
                         break
-                    if training:
-                        training.tick()
+                    if presentation:
+                        presentation.tick()
                     elif tick - last_beat >= limits.get('heartbeat_seconds', 15):
                         last_beat = tick
                         ceiling = ('unbounded' if limits['total_seconds'] is None else f'{limits["total_seconds"]}s')
@@ -295,8 +309,13 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
             lock.unlink()
         signal.signal(signal.SIGINT, previous)
         signal.signal(signal.SIGTERM, previous_term)
-        if training:
-            training.feed_stdout(b'', final=True)
-            training.finish(status)
+        if presentation:
+            if operation:
+                try:
+                    operation.observe(json.loads((output / 'phase.json').read_text()))
+                except (OSError, ValueError):
+                    pass
+            presentation.feed_stdout(b'', final=True)
+            presentation.finish(status)
         display.close()
     return status

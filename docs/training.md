@@ -99,6 +99,13 @@ Evaluation loads the merged GGUF once for the remaining examples in each attempt
 Each example uses a separate request with prompt reuse disabled.
 The worker saves raw answers before it starts the next example.
 
+Evaluation uses a compact display for model export, conversion, loading, and answer generation.
+The display shows saved answer counts, generation failures, elapsed time, and the remaining budget.
+Library output stays in the capture logs.
+Failures show a short error excerpt and the worker and server log paths.
+The command ends with a short status summary and report path.
+Use `--json` to print the complete report as JSON, with progress sent to standard error.
+
 ```bash
 .venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/run-001 --config configs/inference.json
 .venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/evaluation-001 --model artifacts/models/ProxyType-4B/model-bf16.gguf --dataset data/training-dataset --config configs/inference.json
@@ -106,6 +113,8 @@ The worker saves raw answers before it starts the next example.
 ```
 
 The evaluation folder retains raw answers, token IDs when available, generation status, and terminal failures.
+Before export or new generation, the command authenticates the native runtime and its pinned libraries on the CPU.
+Report-only commands and completed-result recovery do not require those runtime files.
 Timeouts and malformed answers stay in the scoring denominator.
 Missing answers make the evaluation incomplete.
 Invalid reference labels prevent a valid accuracy report.

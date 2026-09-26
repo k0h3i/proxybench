@@ -141,7 +141,7 @@ class EvaluationWorkflowTests(unittest.TestCase):
         import sys
         with Run(self.path) as run:
             generate(run, self.inputs, lambda *a: dict(status='TIMEOUT', text=''))
-        process = subprocess.run([sys.executable, '-m', 'proxybench', 'evaluate', '--run-dir', str(self.path), '--report-only'], capture_output=True, text=True)
+        process = subprocess.run([sys.executable, '-m', 'proxybench', 'evaluate', '--run-dir', str(self.path), '--report-only', '--json'], capture_output=True, text=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(json.loads(process.stdout)['status'], 'COMPLETE')
 
@@ -219,7 +219,8 @@ class EvaluationWorkflowTests(unittest.TestCase):
         model.write_bytes(b'synthetic')
         args = Namespace(command='evaluate', run_dir=str(self.path), config=str(config),
                          project_root=None, report_only=False, model=None)
-        with patch('proxybench.training.runtime.export_complete', return_value=model, create=True), \
+        with patch('proxybench.extraction.runtime.runtime_identity', return_value='synthetic'), \
+             patch('proxybench.training.runtime.export_complete', return_value=model, create=True), \
              patch('proxybench.training.runtime.export_model', side_effect=AssertionError('Repeated completed export')), \
              patch('proxybench.evaluation.workflow.prepare_inputs', return_value=self.inputs), \
              patch('proxybench.evaluation.workflow.load_answers', return_value={'one':dict(status='TIMEOUT',text='')}):

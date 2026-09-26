@@ -11,10 +11,10 @@ from proxybench.extraction.llama_server import generate, require_prompt_tokens
 from proxybench.extraction.runtime import model_server, normalize_length_stop, prompt_tokens
 
 
-def phase(value):
+def phase(value, **progress):
     path = os.environ.get('PROXYBENCH_PHASE_FILE')
     if path:
-        durable_json(path, dict(phase=value))
+        durable_json(path, dict(phase=value, **progress))
 
 
 def remaining(deadline):
@@ -60,13 +60,14 @@ def run_session(directory):
     output = directory/'answers'
     output.mkdir(exist_ok=True)
     startup_deadline = time.monotonic() + config['startup_seconds']
-    phase('loading')
+    total, completed, failures = len(request['cases']), 0, 0
+    phase('loading', completed=completed, total=total, failed=failures)
     with supervised_deadline(startup_deadline, directory/'request.json'):
         # Enter separately so the startup deadline ends before case deadlines begin.
         server = model_server(output, config, startup_deadline=startup_deadline)
         port, tokenizer = server.__enter__()
     try:
-        phase('evaluation')
+        phase('evaluation', completed=completed, total=total, failed=failures)
         for index, case in enumerate(request['cases']):
             deadline = time.monotonic() + config['limits']['phase_seconds']
             path = output/f'answer-{index}.json'
@@ -93,11 +94,19 @@ def run_session(directory):
                     answer = failed_answer(path, index, tokenizer, exc)
                 durable_json(path, answer)
                 durable_json(directory/'progress.json', dict(index=index, state='COMPLETE'))
+            completed += 1
+            failures += answer['status'] not in {'COMPLETE', 'LENGTH_STOP'}
+            phase('evaluation', completed=completed, total=total, failed=failures)
             if answer['status'] not in {'COMPLETE', 'LENGTH_STOP'}:
+                print(f'Evaluation stopped at example {index + 1}: {answer["status"]}. '
+                      f'Answer capture: {path}', file=sys.stderr, flush=True)
                 return 1
         return 0
     finally:
-        server.__exit__(*sys.exc_info())
+        try:
+            phase('cleanup', completed=completed, total=total, failed=failures)
+        finally:
+            server.__exit__(*sys.exc_info())
 
 
 if __name__ == '__main__':

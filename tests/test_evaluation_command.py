@@ -9,12 +9,16 @@ import textwrap
 import unittest
 
 from proxybench.evaluation.workflow import create_run, runtime_binding
-from proxybench.extraction.runtime import source_messages
+from proxybench.extraction.runtime import runtime_identity, source_messages
 from proxybench.runstate import binding, file_hash
 from proxybench.training.labels import FIELDS
 
 
 TOKENIZER = '''
+import sys
+print('Synthetic tokenizer library banner', flush=True)
+print('Synthetic tokenizer library warning', file=sys.stderr, flush=True)
+
 class AutoTokenizer:
     eos_token_id = 9999
 
@@ -90,6 +94,8 @@ class EvaluationCommandTests(unittest.TestCase):
             (root/'model.gguf').write_bytes(b'synthetic model; no weights')
             (root/'prompt.txt').write_text('Return the fields found in the marked source.')
             (root/'tokenizer').mkdir()
+            library = root/'libcudart.so.12'
+            library.write_bytes(b'synthetic pinned library')
             (root/'manifest.json').write_text(json.dumps(dict(source_commit='synthetic',
                 files={'llama-server': file_hash(server)})))
             reference = dict(fields={name: dict(value=None, raw_text=None,
@@ -98,6 +104,7 @@ class EvaluationCommandTests(unittest.TestCase):
             config = dict(server=str(server), model=str(root/'model.gguf'),
                 tokenizer=str(root/'tokenizer'), runtime_manifest=str(root/'manifest.json'),
                 source_commit='synthetic', library_path='', server_arguments=[],
+                external_libraries={str(library): file_hash(library)},
                 system_prompt=str(root/'prompt.txt'), input_tokens=4096,
                 response_tokens=4096, context_tokens=8192, startup_seconds=5,
                 natural_request_seconds=5, limits=dict(cpu_only=True, phase_seconds=10,
@@ -116,13 +123,50 @@ class EvaluationCommandTests(unittest.TestCase):
                                PYTHONPATH=os.pathsep.join((str(root), str(source))))
             command = [sys.executable, '-m', 'proxybench', 'evaluate', '--run-dir', str(run)]
 
-            def evaluate(*extra):
+            def execute(*extra, expected_returncode=2):
                 result = subprocess.run([*command, *extra], cwd=root, env=environment,
                                         capture_output=True, text=True, timeout=20)
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(result.returncode, expected_returncode, result.stdout + result.stderr)
+                return result
+
+            def evaluate(*extra):
+                execute(*extra)
                 return json.loads((run/'evaluation/report.json').read_text())
 
-            self.assertEqual(evaluate()['status'], 'PENDING_REVIEW')
+            identity = runtime_identity(config)
+            initial_state = json.loads((run/'run.json').read_text())
+            library.unlink()
+            failed = execute(expected_returncode=1)
+            self.assertIn(str(library), failed.stderr)
+            self.assertIn('docs/preparation.md', failed.stderr)
+            self.assertNotIn('FileNotFoundError', failed.stderr)
+            self.assertFalse((root/'events.jsonl').exists())
+            self.assertFalse(list(run.rglob('resources.jsonl')))
+            self.assertFalse(list((run/'evaluation/capture').glob('session-*')))
+            current = json.loads((run/'run.json').read_text())
+            for key in ('evaluation_sessions', 'pending_charge', 'consumed_seconds'):
+                self.assertEqual(current.get(key), initial_state.get(key), key)
+
+            library.write_bytes(b'synthetic pinned library')
+            self.assertEqual(runtime_identity(config), identity)
+            self.assertEqual(runtime_binding(config), inputs['identity']['runtime'])
+            generation = execute('--json')
+            report = json.loads((run/'evaluation/report.json').read_text())
+            self.assertEqual(report['status'], 'PENDING_REVIEW')
+            self.assertEqual(json.loads(generation.stdout), report)
+            self.assertIn('3/3 (100%) | generation failures 0', generation.stderr)
+            self.assertIn('Generation finished. Scoring and review are pending.', generation.stderr)
+            result = execute()
+            self.assertIn('Evaluation: PENDING_REVIEW', result.stdout)
+            self.assertIn('Review: ' + report['review_path'], result.stdout)
+            self.assertIn('Report: ' + str(run/'evaluation/report.json'), result.stdout)
+            self.assertNotIn('"per_example"', result.stdout)
+            self.assertNotIn('"aggregate"', result.stdout)
+            self.assertLess(len(result.stdout), 2000)
+            self.assertLess(len(result.stdout), len(json.dumps(report)))
+            for banner in ('Synthetic tokenizer library banner', 'Synthetic tokenizer library warning'):
+                self.assertNotIn(banner, result.stdout + result.stderr)
+                self.assertNotIn(banner, generation.stdout + generation.stderr)
             events = [json.loads(line) for line in (root/'events.jsonl').read_text().splitlines()]
             self.assertEqual(sum(event['kind'] == 'start' for event in events), 1)
             self.assertEqual(sum(event['kind'] == 'tokenize' for event in events), 3)
@@ -139,6 +183,8 @@ class EvaluationCommandTests(unittest.TestCase):
             self.assertEqual(len(state['evaluation_sessions']), 1)
             self.assertIsNone(state['pending_charge'])
             session = run/'evaluation/capture'/state['evaluation_sessions'][0]['name']
+            self.assertIn('Synthetic tokenizer library banner', (session/'execution/stdout.log').read_text())
+            self.assertIn('Synthetic tokenizer library warning', (session/'execution/stderr.log').read_text())
             ledger = [json.loads(line) for line in (session/'resources.jsonl').read_text().splitlines()]
             self.assertEqual(len(ledger), 1)
             self.assertEqual(ledger[0]['status'], 'EXITED')
@@ -149,11 +195,16 @@ class EvaluationCommandTests(unittest.TestCase):
             server.unlink()
             (root/'model.gguf').unlink()
             (root/'manifest.json').unlink()
+            library.unlink()
             for options in ((), ('--report-only',)):
                 self.assertEqual(evaluate(*options)['status'], 'PENDING_REVIEW')
                 current = json.loads((run/'run.json').read_text())
                 self.assertEqual(current['consumed_seconds'], state['consumed_seconds'])
                 self.assertEqual(current['evaluation_sessions'], state['evaluation_sessions'])
+            full_report = execute('--report-only', '--json')
+            self.assertEqual(json.loads(full_report.stdout), json.loads((run/'evaluation/report.json').read_text()))
+            self.assertEqual(json.loads(full_report.stdout), report)
+            self.assertEqual(full_report.stderr, '')
             self.assertEqual([json.loads(line) for line in (root/'events.jsonl').read_text().splitlines()], events)
 
 

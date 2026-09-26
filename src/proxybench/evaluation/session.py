@@ -132,7 +132,10 @@ def generate_session(run, inputs):
     limits = {**config['limits'], 'phase_seconds': remaining, 'total_seconds': remaining}
     try:
         supervise([sys.executable, '-m', 'proxybench.evaluation.worker', str(folder.resolve())],
-                  folder / 'execution', limits, ledger=folder / 'resources.jsonl', phase='evaluation')
+                  folder / 'execution', limits, ledger=folder / 'resources.jsonl', phase='evaluation',
+                  progress=dict(completed=len(answers), total=len(inputs['cases']),
+                                failed=sum(answer['status'] not in {'COMPLETE', 'LENGTH_STOP'}
+                                           for answer in answers.values())))
     finally:
         # A live owner blocks recovery and leaves the reservation charged.
         answers = load_answers(run, inputs)

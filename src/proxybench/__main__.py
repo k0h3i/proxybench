@@ -1,5 +1,6 @@
 """Commands for source preparation, training, inference, and evaluation."""
 import argparse
+from contextlib import redirect_stdout
 import json
 import os
 from pathlib import Path
@@ -60,12 +61,13 @@ def evaluation_command(args):
         if args.command == 'evaluate' and state.get('operation') == 'train':
             if getattr(args, 'report_only', False):
                 raise ValueError('This training run has no saved evaluation')
-            from proxybench.extraction.runtime import load_config
+            from proxybench.extraction.runtime import load_config, runtime_identity
             with Run(path) as run:
                 config_path = args.config or run.state['configuration'].get('inference_config')
                 if not config_path:
                     raise ValueError('Supply --config with an inference configuration for this training run')
                 config = load_config(config_path)
+                runtime_identity(config)
                 model = evaluation_export(run)
                 config['model'] = str(model.resolve())
                 dataset = run.state['dataset']
@@ -82,8 +84,9 @@ def evaluation_command(args):
     if args.command == 'evaluate' and args.model:
         if not args.dataset or not args.config:
             raise ValueError('An existing model requires --dataset and --config')
-        from proxybench.extraction.runtime import load_config
+        from proxybench.extraction.runtime import load_config, runtime_identity
         config = load_config(args.config)
+        runtime_identity(config)
         config['model'] = str(Path(args.model).resolve())
         config['dataset'] = str(Path(args.dataset).resolve())
         inputs = prepare_inputs(args.dataset, args.model, config, project_root=args.project_root)
@@ -101,11 +104,28 @@ def evaluation_command(args):
             missing = any(case['id'] not in answers for case in inputs['cases'])
             if missing:
                 config = run.state['configuration']
+                from proxybench.extraction.runtime import runtime_identity
+                runtime_identity(config)
                 if file_hash(config['model']) != inputs['identity']['model'] or runtime_binding(config) != inputs['identity']['runtime']:
                     raise ValueError('Model or runtime inputs changed; use a new run folder')
                 from proxybench.evaluation.session import generate_session
                 answers = generate_session(run, inputs)
         return report(run, inputs, answers)
+
+
+def print_evaluation_summary(result, run_dir):
+    """Keep complete scoring data in the report instead of the terminal."""
+    print(f'Evaluation: {result["status"]}')
+    print(f'Targets: {result["targets"]} | Missing answers: {len(result["missing_answers"])} | '
+          f'Pending review: {len(result["pending_review"])} | '
+          f'Invalid references: {len(result["invalid_references"])}')
+    aggregate = result.get('aggregate')
+    if result.get('valid_accuracy') and aggregate is not None:
+        print(f'Source values correct: {aggregate["source_value_correct"]}/{result["targets"]}')
+    print(f'Report: {Path(run_dir) / "evaluation" / "report.json"}')
+    if result.get('review_path'):
+        print(f'Review: {result["review_path"]}')
+    print(result['interpretation'])
 
 
 def prepare_command(args):
@@ -163,11 +183,14 @@ def main(argv=None):
     evaluate.add_argument('--config')
     evaluate.add_argument('--project-root')
     evaluate.add_argument('--report-only', action='store_true')
+    evaluate.add_argument('--json', action='store_true', help='Print the full report as JSON')
     evaluate.set_defaults(handler=evaluation_command)
     resume = commands.add_parser('resume', help='Continue an interrupted run')
+    resume.add_argument('--json', action='store_true', help='Print the full result as JSON')
     resume.add_argument('--run-dir', required=True)
     resume.set_defaults(handler=evaluation_command)
     review = commands.add_parser('review-import', help='Accept decisions for exact saved answers')
+    review.add_argument('--json', action='store_true', help='Print the full report as JSON')
     review.add_argument('--run-dir', required=True)
     review.add_argument('--decisions', required=True)
     review.set_defaults(handler=evaluation_command)
@@ -200,8 +223,13 @@ def main(argv=None):
     accept.set_defaults(handler=accept_command)
     args = parser.parse_args(argv)
     try:
-        result = args.handler(args)
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        with redirect_stdout(sys.stderr if getattr(args, 'json', False) else sys.stdout):
+            result = args.handler(args)
+        if (isinstance(result, dict) and result.get('schema') == 'proxybench-evaluation-v1'
+                and not getattr(args, 'json', False)):
+            print_evaluation_summary(result, args.run_dir)
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         status = result.get('status') if isinstance(result, dict) else None
         if args.command == 'status':
             return 0

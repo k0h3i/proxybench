@@ -64,31 +64,43 @@ def prompt_tokens(tokenizer, messages, config):
     return tokens, rendered
 
 
+def _read_runtime_file(path, reader):
+    try:
+        return reader(path)
+    except OSError as error:
+        problem = 'Missing runtime file' if isinstance(error, FileNotFoundError) else 'Cannot read runtime file'
+        raise ValueError(f'{problem}: {path}. Follow docs/preparation.md#install-llamacpp-and-its-cuda-libraries.') from None
+
+
 def runtime_identity(config):
+    """Authenticate local runtime files without importing model packages."""
     manifest_path = Path(config['runtime_manifest'])
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(_read_runtime_file(manifest_path, Path.read_text))
     if manifest['source_commit'] != config['source_commit']:
         raise ValueError('Runtime source revision differs')
     root = manifest_path.resolve().parent
     for name, expected in manifest['files'].items():
         path = (root / name).resolve()
-        if not path.is_relative_to(root) or digest(path) != expected:
+        if not path.is_relative_to(root) or _read_runtime_file(path, digest) != expected:
             raise ValueError('Runtime file differs from its manifest')
-    if str(Path(config['server']).resolve().relative_to(root)) not in manifest['files']:
+    server = Path(config['server']).resolve()
+    if not server.is_file():
+        raise ValueError(f'Missing server executable: {server}. Follow docs/preparation.md#install-llamacpp-and-its-cuda-libraries.')
+    if not server.is_relative_to(root) or str(server.relative_to(root)) not in manifest['files']:
         raise ValueError('Server executable is not bound to the runtime manifest')
     for name, expected in config.get('external_libraries', {}).items():
-        if digest(name) != expected:
+        if _read_runtime_file(name, digest) != expected:
             raise ValueError('External runtime library differs from its pinned hash')
-    return digest(manifest_path)
+    return _read_runtime_file(manifest_path, digest)
 
 
 @contextmanager
 def model_server(output_dir, config, *, startup_deadline=None, prepare=None):
     """Keep one authenticated server alive under the caller's supervision."""
-    from transformers import AutoTokenizer
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     identity = runtime_identity(config)
+    from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(config['tokenizer'], local_files_only=True, trust_remote_code=False)
     if prepare is not None:
         prepare(tokenizer)
