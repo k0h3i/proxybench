@@ -154,7 +154,26 @@ The retained recipe uses these settings:
 | Batch size | 1 |
 | Learning rate | 0.0001 |
 | LoRA rank / alpha / dropout | 8 / 16 / 0 |
-| Random seed | 42 |
+
+Hyperparameters are settings chosen before training.
+This block shows the main hyperparameters from [training.json](configs/training.json):
+
+```json
+{
+  "epochs": 2,
+  "batch_size": 1,
+  "accumulation": 1,
+  "learning_rate": 0.0001,
+  "weight_decay": 0,
+  "max_grad_norm": 1.0,
+  "rank": 8,
+  "alpha": 16,
+  "dropout": 0,
+  "context_tokens": 5120,
+  "input_tokens": 3328,
+  "response_tokens": 1792
+}
+```
 
 Training uses the system and user messages as context and learns from the assistant response.
 A token is a unit of text processed by the model.
