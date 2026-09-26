@@ -1,40 +1,48 @@
 # ProxyBench
 
 ProxyBench extracts one marked proxy-voting target from historical SEC Form N-PX text and HTML.
+You select the target and its surrounding source context manually.
 ProxyType-4B is the working name for its trained Qwen3.5-4B model.
-The model returns source values and standardized labels under the [label contract](docs/label-contract.md).
-Target selection remains a manual step.
-The project does not recover every record from a complete filing.
 
-## Setup and use
+The repository provides tools for source preparation, label review, training, and local model use.
+The model weights and accepted dataset remain private and are separate inputs.
 
-Start with the [preparation guide](docs/preparation.md).
-It lists required software, installation commands, model inputs, and CPU acceptance.
-The model workflow requires Python 3.12.14, a root `.venv/`, a C/C++ compiler, and an NVIDIA driver.
-Install Python model packages from [requirements-training.txt](configs/requirements-training.txt).
-Install llama.cpp from the pinned release with the guide's commands.
-Its separate CUDA libraries use [requirements-llama-cuda.txt](configs/requirements-llama-cuda.txt).
-The guide also covers OpenMP, OpenSSL, the base weights, and converter source.
+## Task and workflow
 
-The private model weights and accepted dataset are separate inputs.
-Export authenticates the pinned source archive and its complete extracted files under the [preparation procedure](docs/preparation.md#obtain-converter-source-for-export).
-Complete preparation before the user starts GPU work.
-The CPU source-preparation package supports Python 3.11 or later without model dependencies.
+Each answer describes one voting target, including its fund or group, issuer, proposal, and disclosed votes.
+The required answer format preserves source wording and distinguishes missing information from explicit statements.
+The [label contract](docs/label-contract.md) defines all fourteen fields and their rules.
 
-Use the [dataset guide](docs/dataset.md) to prepare source context and accepted labels.
-Read the [training guide](docs/training.md) for training, resume, and evaluation.
-Read the [inference guide](docs/inference.md) for model loading and new fragments.
-The [repository guide](docs/repository-layout.md) explains storage and package boundaries.
+Follow the guide for your task:
 
-## Scope and release status
+- [Prepare data](docs/dataset.md): Select source context, review labels, and explicitly accept training examples.
+- [Train and evaluate](docs/training.md): Train a model, resume a run, or evaluate a selected model.
+- [Use the model](docs/inference.md): Load ProxyType-4B and extract a record from a new marked fragment.
+
+## Model and data
 
 The retained dataset contains 330 training examples and 90 development examples from 36 source files.
 The development set is exposed reference data, not an untouched test set.
-No independently benchmarked accuracy claim accompanies this model.
-PDF processing, OCR, proposal linking, and complete-filing recovery remain outside this workflow.
+The project makes no independently benchmarked accuracy claim.
 
-Keep source documents, labels, weights, and generated output outside ordinary commits.
-Only explicitly accepted labels become training examples.
-Use one external folder per future run.
+The [model card](MODEL_CARD.md) describes ProxyType-4B, its training recipe, and its model formats.
+The [data notice](DATA_NOTICE.md) describes the source collection and its distribution status.
+
+## Getting started
+
+Start with the [preparation guide](docs/preparation.md) for software, required inputs, installation, and CPU acceptance tests.
+Complete preparation before you start GPU work.
+Portable model loading tests remain pending.
+
+The CPU source-preparation package supports Python 3.11 or later without model dependencies.
+The model workflow uses Python 3.12.14 and the pinned dependencies in the preparation guide.
+The [repository guide](docs/repository-layout.md) explains where code, private data, models, and run outputs belong.
+
+## Limits and release status
+
+ProxyBench does not recover every record from a complete filing.
+PDF processing, image-to-text conversion, categorization, and proposal linking remain outside this workflow.
+Model answers can contain errors and need review.
+
 Public release requires separate approval under the [release guide](docs/release.md).
-Read the [model card](MODEL_CARD.md), [data notice](DATA_NOTICE.md), and [security policy](SECURITY.md) before distribution.
+Read the [security policy](SECURITY.md) before handling untrusted filings or reporting sensitive material.
