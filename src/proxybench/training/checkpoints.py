@@ -1,4 +1,5 @@
 """Publish validated adapter checkpoints without overwriting prior artifacts."""
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import re
@@ -19,8 +20,11 @@ def plain_path(value, label='Checkpoint path'):
 def read_object(path, label):
     from proxybench.training.adapters import read_json
     try:
-        value = read_json(plain_path(path, label).read_bytes())
-    except (OSError, ValueError, TypeError) as exc:
+        source = plain_path(path, label)
+        if not source.is_file() or source.stat().st_size > 16 * 1024 * 1024:
+            raise ValueError(f'{label} must be a regular metadata file of at most 16 MiB')
+        value = read_json(source.read_bytes())
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
         raise ValueError(f'{label} is missing or invalid') from exc
     if not isinstance(value, dict):
         raise ValueError(f'{label} must be a JSON object')
@@ -76,7 +80,7 @@ def validate_checkpoint(directory, expected=None, *, allow_temporary=False, hash
     return manifest
 
 
-def publish_adapter(model, tokenizer, directory, identity=None):
+def publish_adapter(model, tokenizer, directory, identity=None, *, measurements=None):
     from peft import get_peft_model_state_dict
     from safetensors.torch import load_file
     from proxybench.training.adapters import digest, require_same_adapter
@@ -90,28 +94,37 @@ def publish_adapter(model, tokenizer, directory, identity=None):
         stream.write(str(os.getpid()))
     temporary = directory.with_name(directory.name + '.incomplete-' + uuid.uuid4().hex)
     temporary.mkdir()
-    model.save_pretrained(str(temporary), safe_serialization=True, save_embedding_layers=False)
-    tokenizer.save_pretrained(str(temporary))
-    saved = load_file(str(temporary / 'adapter_model.safetensors'))
-    if not saved or any('lora_' not in name for name in saved):
-        raise ValueError('Saved state contains unintended parameters')
-    require_same_adapter(saved, get_peft_model_state_dict(model, save_embedding_layers=False))
+    measure = measurements.stage if measurements else lambda _: nullcontext()
+    with measure('checkpoint_serialization'):
+        model.save_pretrained(str(temporary), safe_serialization=True, save_embedding_layers=False)
+        tokenizer.save_pretrained(str(temporary))
+    with measure('checkpoint_readback'):
+        saved = load_file(str(temporary / 'adapter_model.safetensors'))
+    with measure('checkpoint_comparison'):
+        if not saved or any('lora_' not in name for name in saved):
+            raise ValueError('Saved state contains unintended parameters')
+        require_same_adapter(saved, get_peft_model_state_dict(model, save_embedding_layers=False))
     inventory = {name: {'shape': list(t.shape), 'dtype': str(t.dtype)} for name, t in saved.items()}
-    files = {str(p.relative_to(temporary)): digest(p) for p in temporary.rglob('*') if p.is_file()}
-    durable_json(temporary / 'manifest.json', dict(identity=identity or {}, tensors=inventory, files=files))
-    for path in temporary.rglob('*'):
-        if path.is_file():
-            with path.open('rb') as stream:
-                os.fsync(stream.fileno())
-    durable_json(temporary / 'complete.json', dict(status='COMPLETE', manifest_sha256=digest(temporary / 'manifest.json')))
-    validate_checkpoint(temporary, identity or {}, allow_temporary=True)
+    with measure('checkpoint_hashing'):
+        files = {str(p.relative_to(temporary)): digest(p) for p in temporary.rglob('*') if p.is_file()}
+    with measure('checkpoint_synchronization'):
+        durable_json(temporary / 'manifest.json', dict(identity=identity or {}, tensors=inventory, files=files))
+        for path in temporary.rglob('*'):
+            if path.is_file():
+                with path.open('rb') as stream:
+                    os.fsync(stream.fileno())
+        durable_json(temporary / 'complete.json', dict(status='COMPLETE', manifest_sha256=digest(temporary / 'manifest.json')))
+    with measure('checkpoint_hashing'):
+        validate_checkpoint(temporary, identity or {}, allow_temporary=True)
     if directory.exists():
         raise FileExistsError(directory)
-    temporary.rename(directory)
-    fd = os.open(directory.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    claim.unlink()
-    return validate_checkpoint(directory, identity or {})
+    with measure('checkpoint_publication'):
+        temporary.rename(directory)
+        fd = os.open(directory.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        claim.unlink()
+    with measure('checkpoint_hashing'):
+        return validate_checkpoint(directory, identity or {})

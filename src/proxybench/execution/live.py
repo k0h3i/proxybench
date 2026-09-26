@@ -15,6 +15,11 @@ from proxybench.execution.resources import (
     append_entry, device_memory, durable_json, group_members, host_memory,
     ledger_entries, process_memory,
 )
+from proxybench.execution.training_display import TrainingDisplay
+
+
+SAFE_STOP_PHASES = frozenset({'training', 'compilation', 'saving', 'saving checkpoint',
+                              'validating final adapter', 'publishing final adapter'})
 
 
 class Console:
@@ -109,6 +114,22 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
         stream.write(str(os.getpid()))
     display = Console(console or sys.stdout)
     start = time.monotonic()
+    training = (TrainingDisplay(display.put, tty=bool(getattr(display.stream, 'isatty', lambda: False)()),
+                                started=start, prior_seconds=used, phase_used=phase_used,
+                                total_seconds=limits['total_seconds'], phase_seconds=limits['phase_seconds'])
+                if phase in {'train', 'training'} else None)
+
+    def show(chunk, *, stdout=False):
+        if training and stdout:
+            training.feed_stdout(chunk)
+        elif training:
+            training.message(chunk.decode('utf-8', errors='replace'))
+        else:
+            display.put(chunk.decode('utf-8', errors='replace'))
+
+    def message(text):
+        (training.message if training else display.put)(text)
+
     record = dict(execution_id=uuid.uuid4().hex, run=str(output.resolve()), phase=phase,
                   supervisor_pid=os.getpid(), started_monotonic=start, started_wall=time.time(),
                   boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
@@ -131,6 +152,8 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
     minimum_free = device.get('free_bytes')
     sampler = None
     try:
+        if training:
+            training.render(immediate=True)
         env = dict(os.environ, **(environment or {}),
                    PROXYBENCH_PHASE_FILE=str((output / 'phase.json').resolve()),
                    PROXYBENCH_REQUEST_FILE=str((output / 'request.json').resolve()),
@@ -159,13 +182,13 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                 while True:
                     tick = time.monotonic()
                     if interruptions > acknowledged:
-                        display.put('Stop requested. Saving at a safe boundary, at most 30 seconds.\n'
-                                    if interruptions == 1 else 'Second interrupt. Stopping the owned processes now.\n')
+                        message('Stop requested. Saving at a safe boundary, at most 30 seconds.\n'
+                                if interruptions == 1 else 'Second interrupt. Stopping the owned processes now.\n')
                         acknowledged = interruptions
                     for reader in (out, err):
                         chunk = reader.read(65536)
                         if chunk:
-                            display.put(chunk.decode('utf-8', errors='replace'))
+                            show(chunk, stdout=reader is out)
                     phase_file = output / 'phase.json'
                     if phase_file.exists():
                         label = json.loads(phase_file.read_text())['phase']
@@ -203,19 +226,19 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                     margin = limits.get('automatic_stop_margin_seconds', 0)
                     if (margin and reason is None and not automatic_stop and not interruptions
                             and not (output / 'stop.json').exists()
-                            and label in {'training', 'compilation', 'saving'}
+                            and label in SAFE_STOP_PHASES
                             and any(deadline is not None and deadline <= margin for deadline in (
                                 None if limits['total_seconds'] is None else limits['total_seconds']-used-(tick-start),
                                 None if limits['phase_seconds'] is None else limits['phase_seconds']-phase_used-(tick-start)))):
                         automatic_stop = True
                         durable_json(output / 'stop.json', dict(requested_monotonic=tick,
                                                                  reason='TIME_BUDGET_MARGIN'))
-                        display.put('Time budget margin reached. Saving at a safe boundary.\n')
+                        message('Time budget margin reached. Saving at a safe boundary.\n')
                     if interruptions and stopped_at is None:
                         stopped_at = requested_at
                         if not (output / 'stop.json').exists():
                             durable_json(output / 'stop.json', dict(requested_monotonic=requested_at))
-                        if label not in {'training', 'compilation', 'saving'}:
+                        if label not in SAFE_STOP_PHASES:
                             reason = 'USER_STOP'
                     if interruptions > 1:
                         reason = 'FORCED_STOP'
@@ -235,9 +258,11 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                                 chunk = reader.read(65536)
                                 if not chunk:
                                     break
-                                display.put(chunk.decode('utf-8', errors='replace'))
+                                show(chunk, stdout=reader is out)
                         break
-                    if tick - last_beat >= limits.get('heartbeat_seconds', 15):
+                    if training:
+                        training.tick()
+                    elif tick - last_beat >= limits.get('heartbeat_seconds', 15):
                         last_beat = tick
                         ceiling = ('unbounded' if limits['total_seconds'] is None else f'{limits["total_seconds"]}s')
                         display.put(f'[{phase}: {label}] elapsed {tick-start:.0f}s | '
@@ -252,11 +277,15 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
         if survivors:
             status = 'OWNERSHIP_UNRESOLVED'
         elapsed = time.monotonic() - start
+        failed_seconds = elapsed if status != 'EXITED' else 0
+        prior_failed_seconds = sum(e['elapsed_seconds'] for e in entries if e['status'] != 'EXITED')
         entry = dict(record, status=status, elapsed_seconds=elapsed)
         append_entry(ledger, entry)
         durable_json(output / 'result.json', dict(entry, returncode=process.returncode if process else None,
                      surviving_owned_pids=survivors, total_used_seconds=used+elapsed,
                      phase_used_seconds=phase_used+elapsed, minimum_device_free_bytes=minimum_free,
+                     worker_attempt_seconds=elapsed, failed_attempt_seconds=failed_seconds,
+                     cumulative_failed_attempt_seconds=prior_failed_seconds+failed_seconds,
                      stop_requested=bool(interruptions or automatic_stop or (output / 'stop.json').exists()),
                      automatic_stop_requested=automatic_stop))
         if not survivors:
@@ -264,5 +293,8 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
             lock.unlink()
         signal.signal(signal.SIGINT, previous)
         signal.signal(signal.SIGTERM, previous_term)
+        if training:
+            training.feed_stdout(b'', final=True)
+            training.finish(status)
         display.close()
     return status

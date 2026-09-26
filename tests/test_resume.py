@@ -111,6 +111,8 @@ class ResumeTests(unittest.TestCase):
                 self.rejected()
         (self.output / 'training-journal.json').write_text('{broken')
         self.rejected()
+        (self.output / 'training-journal.json').write_text('[' * 10000 + '0' + ']' * 10000)
+        self.rejected()
         (self.output / 'training-journal.json').unlink()
         self.rejected()
 
@@ -188,7 +190,9 @@ class ResumeTests(unittest.TestCase):
         cases = [None, [], {}, dict(original, order=list(reversed(self.order))),
                  dict(original, completed=True), dict(original, completed=1), dict(original, next_position=1),
                  dict(original, history=[{}]), dict(original, history={}), dict(original, random={}),
-                 dict(original, optimizer=[]), dict(original, parameter_map=[])]
+                 dict(original, optimizer=[]), dict(original, parameter_map=[]),
+                 dict(original, diagnostics=[]), dict(original, diagnostics=None),
+                 dict(original, optimizer=dict(original['optimizer'], param_groups=[None]))]
         for state in cases:
             with self.subTest(state_type=type(state).__name__):
                 torch.save(state, self.checkpoint / 'state.pt')
@@ -199,6 +203,25 @@ class ResumeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     train(self.run['dataset'], self.output, self.config, resume=True)
                 self.assertEqual(self.snapshot(), before)
+
+    def test_metadata_fifos_are_rejected_without_reading_or_launch(self):
+        import os
+        for relative in ('training-journal.json', 'training-inputs.json',
+                         'checkpoints/step-0/complete.json', 'checkpoints/step-0/manifest.json'):
+            with self.subTest(relative=relative):
+                path = self.output / relative
+                content = path.read_bytes()
+                path.unlink()
+                os.mkfifo(path)
+                try:
+                    with patch('proxybench.training.runtime.launch', side_effect=AssertionError('launched')):
+                        with self.assertRaises(ValueError):
+                            resume_training(self.output)
+                    with self.assertRaises(ValueError):
+                        train(self.run['dataset'], self.output, self.config, resume=True)
+                finally:
+                    path.unlink()
+                    path.write_bytes(content)
 
     def test_valid_resume_and_rejected_fresh_preserve_input_bytes(self):
         before = self.snapshot()

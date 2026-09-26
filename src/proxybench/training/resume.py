@@ -8,13 +8,15 @@ from proxybench.training.checkpoints import plain_path, read_object, require_has
 from proxybench.training.trajectory import require_clean_stop, sample_order
 
 
-def training_preflight(dataset, run_dir, config, *, resume=False, run_state=None):
+def training_preflight(dataset, run_dir, config, *, resume=False, run_state=None, training_loop='custom'):
     """Reject predictable failures without importing model packages or writing files."""
     from proxybench.training.dataset import read_release
 
     output = plain_path(run_dir, 'Training run path')
     if not isinstance(config, dict):
         raise ValueError('Training configuration must be an object')
+    if config.get('training_loop', 'custom') != training_loop:
+        raise ValueError('Training loop differs. Use the command for the saved experiment.')
     if (config.get('batch_size') != 1 or config.get('accumulation') != 1 or config.get('max_grad_norm') != 1.0):
         raise ValueError('This worker requires batch size 1, accumulation 1, and gradient norm 1')
     if type(config.get('epochs')) is not int or config['epochs'] <= 0 or type(config.get('seed')) is not int:

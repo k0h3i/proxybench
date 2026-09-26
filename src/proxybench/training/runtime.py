@@ -39,8 +39,11 @@ def resource_floor(run):
     return observed
 
 
-def phase(name):
-    print(f'Phase: {name}', flush=True)
+def phase(name, *, measurements=None, **fields):
+    if measurements is None:
+        print(f'Phase: {name}', flush=True)
+    else:
+        measurements.phase(name, **fields)
     if os.environ.get('PROXYBENCH_PHASE_FILE'):
         durable_json(os.environ['PROXYBENCH_PHASE_FILE'], dict(phase=name))
 
@@ -141,19 +144,52 @@ def attach_adapter(model, config, output):
     return model
 
 
-def train(dataset, run_dir, config, resume=False):
+def train(dataset, run_dir, config, resume=False, *, training_loop='custom'):
     """Worker API. Resume only a trusted local checkpoint after a clean stop."""
+    from proxybench.training.measurements import MeasurementRecorder, event_line
+    measurements = MeasurementRecorder(emit=lambda event: print(event_line(event), flush=True))
+    try:
+        result = _train(dataset, run_dir, config, resume, measurements, training_loop=training_loop)
+    except BaseException:
+        measurements.finish('FAILED')
+        raise
+    else:
+        measurements.finish('COMPLETE' if result['status'] == 'TRAINED' else 'CLEAN_STOP',
+                            result_published=True, resume_eligible=result['status'] == 'CLEAN_STOP')
+        return result
+    finally:
+        # Captures are accounting evidence. Never rewrite training provenance on rejection.
+        capture = os.environ.get('PROXYBENCH_PHASE_FILE')
+        if capture:
+            durable_json(Path(capture).parent / 'training-measurements.json', measurements.snapshot())
+
+
+def _train(dataset, run_dir, config, resume, measurements, *, training_loop='custom'):
     from proxybench.training.resume import training_preflight
-    from proxybench.training.trajectory import load_state, restore_loaded_state, publish_state, train_updates
-    accepted = training_preflight(dataset, run_dir, config, resume=resume)
-    rows, identity, order = accepted['rows'], accepted['identity'], accepted['order']
-    completed = accepted['completed']
-    saved = (load_state(accepted['checkpoint'], identity=identity, order=order, completed=completed)
-             if resume else None)
+    from proxybench.training.trajectory import load_state, restore_loaded_state, publish_state, train_updates, require_clean_stop
+    from proxybench.training.measurements import capture_runtime_identity, compare_runtime_identity
+    from proxybench.training.runtime_facts import optimizer_identity, device_and_kernels, DeviceComputeTimer
+    phase('preparation', measurements=measurements)
+    with measurements.stage('preparation'):
+        accepted = training_preflight(dataset, run_dir, config, resume=resume, training_loop=training_loop)
+        if getattr(train_updates, '_proxybench_training_loop', 'custom') != training_loop:
+            raise ValueError('The active training loop differs from the requested experiment')
+        rows, identity, order = accepted['rows'], accepted['identity'], accepted['order']
+        completed = accepted['completed']
+        saved = (load_state(accepted['checkpoint'], identity=identity, order=order, completed=completed)
+                 if resume else None)
+    epochs = [len(rows['training']) * epoch for epoch in range(1, config['epochs'] + 1)]
+    counters = dict(global_step=completed, sample_position=completed, planned_updates=len(order),
+                    epoch_boundaries=epochs, batch_size=config['batch_size'],
+                    gradient_accumulation_steps=config['accumulation'],
+                    effective_batch_size=config['batch_size'] * config['accumulation'],
+                    resume_eligible=bool(resume),
+                    last_checkpoint=(dict(path=str(accepted['checkpoint']), global_step=completed) if resume else None))
+    phase('preparation', measurements=measurements, **counters)
     # CPU checkpoint checks finish before imports that initialize the GPU stack.
     from unsloth import FastLanguageModel
     import torch
-    from transformers import set_seed
+    from transformers import set_seed, AutoTokenizer
     from peft import get_peft_model_state_dict, set_peft_model_state_dict
     from unsloth_zoo.loss_utils import fused_linear_cross_entropy
     from proxybench.training.checkpoints import publish_adapter
@@ -166,63 +202,119 @@ def train(dataset, run_dir, config, resume=False):
     set_seed(config['seed'])
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
-    phase('preparation')
-    snapshot = base_snapshot(config)
-    from transformers import AutoTokenizer
-    prepared_tokenizer = AutoTokenizer.from_pretrained(snapshot, local_files_only=True, trust_remote_code=False)
-    items = prepare_sequences(prepared_tokenizer, rows, config)
-    phase('loading')
-    model, tokenizer = load_base(config, snapshot)
-    if prepare_sequences(tokenizer, rows, config) != items:
-        raise ValueError('Loaded tokenizer changes prepared sequences')
-    pristine = {n: tensor_hash(p) for n, p in model.named_parameters()}
-    model = attach_adapter(model, config, output)
-    base = model.get_base_model()
-    backbone, head = base.model, base.get_output_embeddings()
-    collator = ResponseCollator(tokenizer.pad_token_id)
-    FastLanguageModel.for_training(model, use_gradient_checkpointing='unsloth')
-    model.train()
-    base.config.use_cache = False
-    optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
-                                 lr=config['learning_rate'], weight_decay=config['weight_decay'])
+    with measurements.stage('preparation'):
+        snapshot = base_snapshot(config)
+        prepared_tokenizer = AutoTokenizer.from_pretrained(snapshot, local_files_only=True, trust_remote_code=False)
+        items = prepare_sequences(prepared_tokenizer, rows, config)
+    phase('loading', measurements=measurements)
+    # Peaks cover loading and training in this worker, never inherited resume peaks.
+    torch.cuda.init()
+    measurements.begin_memory_window('before_model_loading_through_publication', reset=torch.cuda.reset_peak_memory_stats,
+                                     global_step=completed)
+    with measurements.stage('model_loading'):
+        model, tokenizer = load_base(config, snapshot)
+        if prepare_sequences(tokenizer, rows, config) != items:
+            raise ValueError('Loaded tokenizer changes prepared sequences')
+    with measurements.stage('initial_base_hashing'):
+        pristine = {n: tensor_hash(p) for n, p in model.named_parameters()}
+    with measurements.stage('adapter_attachment'):
+        model = attach_adapter(model, config, output)
+        base = model.get_base_model()
+        backbone, head = base.model, base.get_output_embeddings()
+        collator = ResponseCollator(tokenizer.pad_token_id)
+        FastLanguageModel.for_training(model, use_gradient_checkpointing='unsloth')
+        model.train()
+        base.config.use_cache = False
+        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                                     lr=config['learning_rate'], weight_decay=config['weight_decay'])
+    hardware, kernels = device_and_kernels(torch)
+    profile = os.environ.get('PROXYBENCH_PROFILE_CUDA') == '1'
+    if profile and not os.environ.get('PROXYBENCH_STOP_FILE'):
+        raise ValueError('Device profiling requires the bounded supervisor')
+    compute_timer = DeviceComputeTimer(torch) if profile else None
+    kernels['device_event_profiling'] = profile
+    runtime = capture_runtime_identity(
+        model=dict(model_id=config['model_id'], revision=config['model_revision'],
+                   manifest_sha256=BASE_MANIFEST_SHA256, architecture=type(base).__name__,
+                   training_loop=training_loop),
+        tokenizer=tokenizer_identity(snapshot), optimizer=optimizer_identity(model, optimizer),
+        hardware=hardware, kernels=kernels)
+    prior_runtime = saved.get('diagnostics', {}).get('runtime_identity') if saved else None
+    runtime_comparison = compare_runtime_identity(prior_runtime, runtime)
+    record = dict(runtime_identity=runtime, comparison=runtime_comparison,
+                  origin_runtime_identity=(saved.get('diagnostics', {}).get('origin_runtime_identity', prior_runtime)
+                                           if saved else runtime))
+    attempts = output / 'training-attempts'
+    attempts.mkdir(exist_ok=True)
+    durable_json(attempts / (measurements.attempt_id + '.json'), record)
+    if resume and runtime_comparison['status'] != 'MATCH':
+        print('Runtime identity differs or is incomplete. Exact CUDA continuation requires new acceptance.', flush=True)
     weights = lambda: get_peft_model_state_dict(model, save_embedding_layers=False)
     journal = output/'training-journal.json'
     history = []
+    # Restore random state after every model, optimizer, and runtime inspection operation.
     if saved is not None:
-        restore_loaded_state(model, optimizer, saved, order=order, completed=completed,
-                             get_weights=weights, set_weights=lambda v: set_peft_model_state_dict(model, v))
+        with measurements.stage('restoration'):
+            restore_loaded_state(model, optimizer, saved, order=order, completed=completed,
+                                 get_weights=weights, set_weights=lambda v: set_peft_model_state_dict(model, v))
         history = saved['history']
     else:
         durable_json(output/'training-inputs.json', accepted['inputs'])
-    def memory():
-        torch.cuda.synchronize()
+
+    def memory(*, enforce=True):
+        if enforce:
+            torch.cuda.synchronize()
         free, total = torch.cuda.mem_get_info()
-        if free < config['limits']['device_margin_bytes']:
+        if enforce and free < config['limits']['device_margin_bytes']:
             raise ValueError('Device memory margin exhausted')
-        return dict(allocated_bytes=torch.cuda.memory_allocated(), free_bytes=free, total_bytes=total)
+        values = dict(allocated_bytes=torch.cuda.memory_allocated(), reserved_bytes=torch.cuda.memory_reserved(),
+                      peak_allocated_bytes=torch.cuda.max_memory_allocated(),
+                      peak_reserved_bytes=torch.cuda.max_memory_reserved(), free_device_bytes=free)
+        measurements.memory_sample(**values)
+        return dict(**values, free_bytes=free, total_bytes=total)
+
     def loss(index):
         item = items['training'][index]
         values = {k: v.to('cuda') for k, v in collator([item]).items()}
         hidden = backbone(input_ids=values['input_ids'], attention_mask=values['attention_mask'],
                           use_cache=False, return_dict=True).last_hidden_state
         return fused_linear_cross_entropy(hidden, head.weight, values['labels']), item['response_tokens']
+
     def save(step, history, clean):
-        phase('saving')
+        phase('saving checkpoint', measurements=measurements, global_step=step, sample_position=step,
+              resume_eligible=False)
         path = output/'checkpoints'/f'step-{step:06}-{uuid.uuid4().hex[:8]}'
         publish_state(model, optimizer, tokenizer, path, identity=identity, order=order,
-                      completed=step, history=history, get_weights=weights,
-                      save_adapter=lambda p: publish_adapter(model, tokenizer, p, dict(identity, completed=step)))
-        phase('training')
+                      completed=step, history=history, get_weights=weights, diagnostics=record,
+                      measurements=measurements,
+                      save_adapter=lambda p: publish_adapter(model, tokenizer, p, dict(identity, completed=step),
+                                                           measurements=measurements))
+        phase('training', measurements=measurements,
+              last_checkpoint=dict(path=str(path), global_step=step), resume_eligible=False)
         return path
-    phase('training')
-    result = train_updates(model, optimizer, order, loss, journal, start=completed, history=history,
-                           stop=stopping, save=save, checkpoint_interval=config['checkpoint_interval'], memory=memory)
+
+    phase('training', measurements=measurements, **counters)
+    with measurements.stage('full_loop'):
+        result = train_updates(model, optimizer, order, loss, journal, start=completed, history=history,
+                               stop=stopping, save=save, checkpoint_interval=config['checkpoint_interval'],
+                               memory=memory, report=None, measurements=measurements,
+                               sequence_tokens=lambda index: sum(items['training'][index]['attention_mask']),
+                               epoch_boundaries=epochs, compute_timer=compute_timer)
     if result['status'] == 'TRAINED':
-        phase('saving')
-        after = {n.replace('.base_layer.', '.'): tensor_hash(p) for n,p in base.named_parameters() if 'lora_' not in n}
-        if after != pristine:
-            raise ValueError('Training changed frozen base parameters')
-        publish_adapter(model, tokenizer, output/'adapter', dict(identity, completed=len(order)))
+        phase('validating final adapter', measurements=measurements)
+        with measurements.stage('final_validation'):
+            after = {n.replace('.base_layer.', '.'): tensor_hash(p) for n,p in base.named_parameters() if 'lora_' not in n}
+            if after != pristine:
+                raise ValueError('Training changed frozen base parameters')
+        phase('publishing final adapter', measurements=measurements)
+        with measurements.stage('final_publication'):
+            publish_adapter(model, tokenizer, output/'adapter', dict(identity, completed=len(order)),
+                            measurements=measurements)
+    else:
+        previous = json.loads(journal.read_text())
+        require_clean_stop(previous, previous.get('checkpoint'), identity, total=len(order))
+    # Read final publication peaks without adding a display synchronization or a new stop policy.
+    memory(enforce=False)
     durable_json(output/'training-result.json', result)
     return result
 
@@ -386,7 +478,7 @@ def training_status(root, status):
     return status
 
 
-def resume_training(run_dir):
+def resume_training(run_dir, *, training_loop='custom'):
     from proxybench.runstate import Run
     from proxybench.training.resume import training_preflight
     with Run(run_dir) as run:
@@ -395,7 +487,8 @@ def resume_training(run_dir):
         config = run.state.get('configuration')
         if not isinstance(run.state.get('dataset'), str) or not run.state['dataset']:
             raise ValueError('Training run dataset path is missing or invalid')
-        training_preflight(run.state['dataset'], run_dir, config, resume=True, run_state=run.state)
+        training_preflight(run.state['dataset'], run_dir, config, resume=True, run_state=run.state,
+                           training_loop=training_loop)
         from proxybench.execution.resources import ledger_entries
         resource_floor(run)
         root_used = sum(row['elapsed_seconds'] for row in ledger_entries(Path(run_dir)/'resources.jsonl'))
@@ -493,10 +586,12 @@ def add_cli(subparsers):
         p.set_defaults(handler=cli)
 
 
-def cli(args):
+def cli(args, *, training_loop='custom'):
     from proxybench.runstate import Run
     from proxybench.execution.resources import ledger_entries
     config = load_config(args.config)
+    if training_loop != 'custom':
+        config = dict(config, training_loop=training_loop)
     if getattr(args, 'model', None):
         config['model'] = str(Path(args.model).resolve())
     operation = 'infer' if hasattr(args, 'input') else 'train' if hasattr(args, 'dataset') else 'export'
@@ -530,7 +625,8 @@ def cli(args):
                 infer_run(run)
             elif operation == 'train':
                 from proxybench.training.resume import training_preflight
-                training_preflight(run.state['dataset'], args.run_dir, config, run_state=run.state)
+                training_preflight(run.state['dataset'], args.run_dir, config, run_state=run.state,
+                                   training_loop=training_loop)
                 status = launch(operation, args.run_dir, config, dataset=run.state['dataset'], resume=False)
                 run.state['status'] = training_status(args.run_dir, status)
             else:

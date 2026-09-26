@@ -1,5 +1,6 @@
 """Save exact update trajectories and restore only their current safe boundary."""
 
+from contextlib import nullcontext
 import os
 import math
 from pathlib import Path
@@ -75,7 +76,7 @@ def parameter_map(model, optimizer):
 
 
 def publish_state(model, optimizer, tokenizer, directory, *, identity, order, completed, history,
-                  get_weights=None, save_adapter=None, diagnostics=None):
+                  get_weights=None, save_adapter=None, diagnostics=None, measurements=None):
     """Read tensors back before publishing. Keep interrupted staging intact."""
     import torch
     directory = Path(directory)
@@ -92,28 +93,36 @@ def publish_state(model, optimizer, tokenizer, directory, *, identity, order, co
                  order=order, completed=completed, next_position=completed, history=history,
                  diagnostics=diagnostics or {})
     # A private local checkpoint contains Python and NumPy random states.
-    torch.save(state, stage / 'state.pt')
-    loaded = torch.load(stage / 'state.pt', map_location='cpu', weights_only=False)
-    assert_same(state, loaded)
+    measure = measurements.stage if measurements else lambda _: nullcontext()
+    with measure('checkpoint_serialization'):
+        torch.save(state, stage / 'state.pt')
+    with measure('checkpoint_readback'):
+        loaded = torch.load(stage / 'state.pt', map_location='cpu', weights_only=False)
+    with measure('checkpoint_comparison'):
+        assert_same(state, loaded)
     if save_adapter:
         save_adapter(stage / 'adapter')
     if tokenizer:
         tokenizer.save_pretrained(stage / 'tokenizer')
-    files = {str(p.relative_to(stage)): digest(p) for p in stage.rglob('*') if p.is_file()}
+    with measure('checkpoint_hashing'):
+        files = {str(p.relative_to(stage)): digest(p) for p in stage.rglob('*') if p.is_file()}
     durable_json(stage / 'manifest.json', dict(identity=identity, completed=completed, files=files))
-    for path in stage.rglob('*'):
-        if path.is_file():
-            with path.open('rb') as stream:
-                os.fsync(stream.fileno())
-    durable_json(stage / 'complete.json', dict(status='COMPLETE', manifest_sha256=digest(stage / 'manifest.json')))
-    validate_checkpoint(stage, identity, allow_temporary=True)
-    stage.rename(directory)
-    fd = os.open(directory.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    claim.unlink()
+    with measure('checkpoint_synchronization'):
+        for path in stage.rglob('*'):
+            if path.is_file():
+                with path.open('rb') as stream:
+                    os.fsync(stream.fileno())
+        durable_json(stage / 'complete.json', dict(status='COMPLETE', manifest_sha256=digest(stage / 'manifest.json')))
+    with measure('checkpoint_hashing'):
+        validate_checkpoint(stage, identity, allow_temporary=True)
+    with measure('checkpoint_publication'):
+        stage.rename(directory)
+        fd = os.open(directory.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        claim.unlink()
     # Saving must not alter the random trajectory that the checkpoint records.
     restore_random(state['random'])
     return directory
@@ -153,6 +162,19 @@ def validate_trajectory(state, order, completed):
             or any(not isinstance(group, list) or not group or any(not isinstance(n, str) or not n for n in group)
                    for group in mapping)):
         raise ValueError('Checkpoint weights or optimizer structure is invalid')
+    groups = state['optimizer']['param_groups']
+    if (len(groups) != len(mapping)
+            or any(not isinstance(group, dict) or not isinstance(group.get('params'), list)
+                   or len(group['params']) != len(names)
+                   or any(type(index) is not int or index < 0 for index in group['params'])
+                   for group, names in zip(groups, mapping))
+            or ('diagnostics' in state and not isinstance(state['diagnostics'], dict))):
+        raise ValueError('Checkpoint optimizer groups or diagnostics are invalid')
+    parameter_ids = [index for group in groups for index in group['params']]
+    if (len(set(parameter_ids)) != len(parameter_ids)
+            or any(type(index) is not int or index not in parameter_ids or not isinstance(value, dict)
+                   for index, value in state['optimizer']['state'].items())):
+        raise ValueError('Checkpoint optimizer state mapping is invalid')
     rng = state['random']
     if not isinstance(rng, dict) or not {'python', 'numpy', 'cpu', 'device'} <= rng.keys():
         raise ValueError('Checkpoint random state is missing required fields')
@@ -191,6 +213,14 @@ def restore_loaded_state(model, optimizer, state, *, order, completed, set_weigh
     validate_trajectory(state, order, completed)
     if state['parameter_map'] != parameter_map(model, optimizer):
         raise ValueError('Checkpoint parameter mapping differs')
+    current_groups = optimizer.state_dict()['param_groups']
+    saved_groups = state['optimizer']['param_groups']
+    if (len(saved_groups) != len(current_groups)
+            or any(not isinstance(saved, dict)
+                   or {key: value for key, value in saved.items() if key != 'params'}
+                   != {key: value for key, value in current.items() if key != 'params'}
+                   for saved, current in zip(saved_groups, current_groups))):
+        raise ValueError('Checkpoint optimizer settings differ from the initialized recipe')
     (set_weights or model.load_state_dict)(state['weights'])
     assert_same(state['weights'], (get_weights or model.state_dict)())
     optimizer.load_state_dict(state['optimizer'])
@@ -237,65 +267,121 @@ def require_clean_stop(journal, checkpoint, identity, *, total=None, hash_files=
 
 def train_updates(model, optimizer, order, loss_fn, journal_path, *, start=0, history=None,
                   stop=lambda: False, save=None, checkpoint_interval=48, before_update=None, after_update=None,
-                  memory=lambda: {}, report=print, checkpoint_steps=()):
+                  memory=lambda: {}, report=print, checkpoint_steps=(), measurements=None,
+                  sequence_tokens=None, epoch_boundaries=None, compute_timer=None):
     """Train deterministic updates and preserve a clean resume boundary."""
     import torch
+    from proxybench.training.measurements import epoch_progress
     history = list(history or [])
-    begin = time.monotonic()
     completed = start
+    measure = measurements.stage if measurements else lambda _: nullcontext()
+    last_checkpoint = None
+    loop_started = measurements.clock() if measurements else time.monotonic()
 
     def journal(status, pending=None, **extra):
-        durable_json(journal_path, dict(status=status, completed=completed, pending_step=pending, **extra))
+        with measure('journal'):
+            durable_json(journal_path, dict(status=status, completed=completed, pending_step=pending, **extra))
+
+    def checkpoint(clean):
+        nonlocal last_checkpoint
+        with measure('checkpoint'):
+            path = save(completed, history, clean)
+        if path is not None:
+            last_checkpoint = dict(path=str(path), global_step=completed)
+        return path
 
     def clean_stop():
         if save is None:
             raise ValueError('A clean stop requires a checkpoint saver')
-        path = save(completed, history, True)
+        path = checkpoint(True)
         journal('CLEAN_STOP', checkpoint=str(path.resolve()), checkpoint_sha256=digest(path / 'manifest.json'))
         return dict(status='CLEAN_STOP', completed=completed, history=history)
+
+    def measured_update(row, started, compute_seconds):
+        if measurements is None:
+            return
+        elapsed = measurements.clock() - started
+        row['full_loop_seconds'] = elapsed
+        count = sequence_tokens(row['index']) if sequence_tokens else row['response_tokens']
+        fields = dict(loss=row['loss'], weighted_loss_12=weighted_loss(history[-12:]),
+                      learning_rate=optimizer.param_groups[0]['lr'], gradient_norm=row['gradient_norm'],
+                      planned_updates=len(order), resume_eligible=False)
+        if last_checkpoint is not None:
+            fields['last_checkpoint'] = last_checkpoint
+        if epoch_boundaries:
+            fields.update(epoch_progress(completed, epoch_boundaries))
+        # Event publication is measured separately, outside its own rate window.
+        with measure('measurement_overhead'):
+            measurements.record_update(global_step=completed, sample_position=completed,
+                nonpadding_tokens=count, supervised_tokens=row['response_tokens'],
+                full_loop_seconds=elapsed, compute_seconds=compute_seconds,
+                compute_timing='device_events' if compute_timer else 'host_wall',
+                remaining_loop_seconds=(None if len(measurements.updates) < 3 else
+                    (measurements.clock() - loop_started)
+                    / (completed - start) * (len(order) - completed)), **fields)
 
     journal('READY')
     for position in range(start, len(order)):
         if stop():
             return clean_stop()
+        started = measurements.clock() if measurements else time.monotonic()
         journal('UPDATING', position + 1)
         if before_update:
             before_update(position + 1)
-        tick = time.monotonic()
-        optimizer.zero_grad(set_to_none=True)
-        loss, count = loss_fn(order[position])
-        if not torch.isfinite(loss):
-            raise ValueError('Nonfinite training loss')
-        loss.backward()
-        norm = torch.nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad], 1.0)
-        if not torch.isfinite(norm):
-            raise ValueError('Nonfinite gradient norm')
-        optimizer.step()
-        # Copying the loss also synchronizes the completed device update.
-        value = loss.item()
+        tick = measurements.clock() if measurements else time.monotonic()
+        if compute_timer:
+            with measure('measurement_overhead'):
+                compute_timer.start()
+        with measure('compute'):
+            optimizer.zero_grad(set_to_none=True)
+            loss, count = loss_fn(order[position])
+            if not torch.isfinite(loss):
+                raise ValueError('Nonfinite training loss')
+            loss.backward()
+            norm = torch.nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad], 1.0)
+            if not torch.isfinite(norm):
+                raise ValueError('Nonfinite gradient norm')
+            optimizer.step()
+            # This existing scalar read waits for loss calculation, not isolated GPU computation.
+            value = loss.item()
+        if compute_timer:
+            with measure('measurement_overhead'):
+                compute_timer.stop()
+        compute_seconds = (measurements.clock() if measurements else time.monotonic()) - tick
         completed = position + 1
+        with measure('monitor'):
+            sampled = memory()
         row = dict(step=completed, index=order[position], loss=value, response_tokens=count,
-                   update_seconds=time.monotonic()-tick, **memory())
+                   update_seconds=compute_seconds, gradient_norm=float(norm), **sampled)
+        if compute_timer:
+            with measure('measurement_overhead'):
+                compute_seconds = compute_timer.seconds()
+                row['device_compute_seconds'] = compute_seconds
+        if epoch_boundaries:
+            row.update(epoch_progress(completed, epoch_boundaries))
         history.append(row)
         journal('BOUNDARY')
-        elapsed = time.monotonic()-begin
-        recent = weighted_loss(history[-12:])
-        steps_here = completed-start
-        eta = f'{sum(r["update_seconds"] for r in history[-12:])/min(12, len(history))*(len(order)-completed):.0f}s' if steps_here >= 4 else 'estimating'
-        report(f'step {completed:03}/{len(order)} | '
-               f'loss {value:.5f} | recent loss {recent:.5f} | lr {optimizer.param_groups[0]["lr"]:g} | '
-               f'elapsed {elapsed:.0f}s | training left ~{eta} | '
-               f'allocated {row.get("allocated_bytes", 0)/1024**3:.2f} GiB | '
-               f'device free {row.get("free_bytes", 0)/1024**3:.2f} GiB')
+        with measure('report'):
+            if report is not None:
+                report(f'Optimizer updates: {completed}/{len(order)} | loss {value:.5f} | '
+                       f'response-token-weighted loss (last 12 updates) {weighted_loss(history[-12:]):.5f} | '
+                       f'learning rate {optimizer.param_groups[0]["lr"]:g}')
         if stop():
-            return clean_stop()
+            result = clean_stop()
+            measured_update(row, started, compute_seconds)
+            return result
         if after_update:
             after_update(completed, history)
         if stop():
-            return clean_stop()
+            result = clean_stop()
+            measured_update(row, started, compute_seconds)
+            return result
         if save and (completed % checkpoint_interval == 0 or completed in checkpoint_steps):
-            save(completed, history, False)
+            checkpoint(False)
         if stop():
-            return clean_stop()
+            result = clean_stop()
+            measured_update(row, started, compute_seconds)
+            return result
+        measured_update(row, started, compute_seconds)
     journal('TRAINED')
     return dict(status='TRAINED', completed=completed, history=history)

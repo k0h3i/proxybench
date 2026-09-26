@@ -41,6 +41,44 @@ Interrupted writes cannot count as completed checkpoints.
 An explicit resume continues validated saved work and preserves resource totals.
 Deleting completed historical optimizer state intentionally gives up resuming that old run.
 
+Resume requires the exact checkpoint named by a `CLEAN_STOP` journal.
+The command rejects invalid journal metadata and changed input identities before it starts a worker.
+The bounded worker authenticates checkpoint files and reads trusted state on the CPU before it loads the GPU model.
+Existing `training-inputs.json` bytes stay unchanged during resume and rejected fresh training.
+Rejected worker attempts still count toward resource limits.
+
+`READY`, `BOUNDARY`, `UPDATING`, and `TRAINED` do not authorize ordinary resume.
+A periodic checkpoint alone does not authorize rollback.
+Final publication can still fail after the journal records `TRAINED`.
+Finalization retry and rollback require a separate recovery-policy decision.
+
+## Training measurements and display
+
+An optimizer update applies gradients to the trainable parameters.
+An epoch is one pass through the training examples.
+The display counts optimizer updates and derives epoch progress from the recorded sample position.
+The supervisor renders terminal progress and readable redirected summaries.
+Display refreshes do not change safety monitoring, journal writes, or checkpoint frequency.
+
+Worker events record preparation, loading, updates, checkpoint stages, and final publication.
+The supervisor charges the complete attempt, including failed attempts and startup.
+Token rates use completed loop intervals and separate all sequence tokens from supervised response tokens.
+The final loop summary includes journal writes, monitoring, event emission, and checkpoint work.
+The recent display rate excludes event emission and states that exclusion beside its window.
+The first update stays separate from later updates because compilation can affect its duration.
+Ordinary computation measurements use host wall time and do not isolate asynchronous GPU kernel time.
+Separate bounded profiling can enable device events through `PROXYBENCH_PROFILE_CUDA=1`.
+This mode uses the existing safety synchronization and records event overhead.
+
+The runtime record binds executing code, packages, model, tokenizer, optimizer, hardware, and kernel configuration.
+Resume preserves earlier records and records the current attempt separately.
+A missing or changed runtime identity requires new acceptance before an exact-continuation claim.
+Even a matching identity does not establish CUDA continuation by itself.
+
+At 100 percent of updates, final validation and publication can still be active.
+The display reports success only after publication, the worker result, and the worker process succeed.
+The [training acceptance guide](training-acceptance.md) describes separate loss and continuation checks.
+
 ## Selected-model evaluation
 
 Evaluation scores one selected model against development references.
