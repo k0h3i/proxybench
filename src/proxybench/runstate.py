@@ -60,7 +60,7 @@ class Run:
             if self.create:
                 self.state = dict(schema='proxybench-run-v1', identity=self.identity,
                                   configuration=self.config, status='READY', consumed_seconds=0,
-                                  pending_charge=None, resource_limit_seconds=self.config.get('limits', {}).get('total_seconds', self.config.get('total_seconds', 3600)))
+                                  pending_charge=None, resource_limit_seconds=self.config.get('limits', {}).get('total_seconds', 3600))
                 self.save()
             else:
                 self.state = json.loads((self.path / 'run.json').read_text())

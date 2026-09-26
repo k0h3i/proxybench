@@ -168,7 +168,7 @@ def validate_trajectory(state, order, completed):
                    or len(group['params']) != len(names)
                    or any(type(index) is not int or index < 0 for index in group['params'])
                    for group, names in zip(groups, mapping))
-            or ('diagnostics' in state and not isinstance(state['diagnostics'], dict))):
+            or not isinstance(state.get('diagnostics'), dict)):
         raise ValueError('Checkpoint optimizer groups or diagnostics are invalid')
     parameter_ids = [index for group in groups for index in group['params']]
     if (len(set(parameter_ids)) != len(parameter_ids)

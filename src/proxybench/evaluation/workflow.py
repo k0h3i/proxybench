@@ -2,7 +2,6 @@
 import html
 import json
 from pathlib import Path
-import time
 
 from proxybench.evaluation.answers import score_system, SCORER_VERSION
 from proxybench.evaluation.training_labels import parse_answer, quote_paths
@@ -63,51 +62,22 @@ def answer_binding(inputs, case, answer):
     return binding(dict(identity=inputs['identity'], case=case, answer=answer))
 
 
-def recover_legacy_capture(run, inputs, case):
-    """Import a completed capture from the earlier per-example execution path."""
-    config = run.state['configuration']
-    limit = config.get('limits', {}).get('phase_seconds', config.get('request_seconds', 120))
-    output = run.path / 'evaluation' / 'capture' / binding(case['id'])
-    captures = [output] + sorted((p for p in output.glob('*') if p.is_dir() and p.name.isdigit()),
-                                 key=lambda p: int(p.name), reverse=True)
-    for capture in captures:
-        captured = capture / 'answers' / 'answer-0.json'
-        if not captured.exists():
-            continue
-        request = read_json((capture / 'request.json').read_text())
-        if request != dict(messages=[case['messages']], config=config):
-            raise ValueError('Interrupted capture has stale inputs')
-        raw = read_json(captured.read_text())
-        if isinstance(raw.get('status'), str) and raw['status'] and raw['status'] != 'STARTED' and isinstance(raw.get('text'), str):
-            saved = dict(binding=answer_binding(inputs, case, raw), answer=raw, elapsed_seconds=limit)
-            atomic_json(run.path / 'evaluation' / 'results' / (binding(case['id']) + '.json'), saved)
-            run.settle(case['id'], limit)
-            return
-
-
 def load_answers(run, inputs):
     from proxybench.execution.resources import reconcile_captures
     capture_seconds = reconcile_captures(run.path / 'evaluation' / 'capture')
-    if 'evaluation_resource_base_seconds' not in run.state:
-        pending = run.state.get('pending_charge')
-        reserved = pending['seconds'] if pending else 0
-        run.state['evaluation_resource_base_seconds'] = run.state['consumed_seconds'] - reserved
     from proxybench.evaluation.session import recover_sessions
     recover_sessions(run, inputs)
     answers = {}
     for case in inputs['cases']:
         path = run.path / 'evaluation' / 'results' / (binding(case['id']) + '.json')
         if not path.exists():
-            recover_legacy_capture(run, inputs, case)
-        if not path.exists():
             continue
         saved = read_json(path.read_text())
         if saved['binding'] != answer_binding(inputs, case, saved['answer']):
             raise ValueError('A cached answer has a stale input binding')
         answers[case['id']] = saved['answer']
-        run.settle(case['id'], saved['elapsed_seconds'])
     # Reconciled executions can exceed a reservation during interrupted cleanup.
-    # Never let a saved-answer settlement erase their measured cost.
+    # Preserve the measured cost after session settlement.
     run.state['consumed_seconds'] = max(run.state['consumed_seconds'],
                                       run.state['evaluation_resource_base_seconds'] + capture_seconds)
     run.save()
@@ -116,39 +86,6 @@ def load_answers(run, inputs):
                         answer=answers[case['id']]), ensure_ascii=False) + '\n'
         for case in inputs['cases'] if case['id'] in answers))
     return answers
-
-
-def generate(run, inputs, generator):
-    answers = load_answers(run, inputs)
-    config = run.state['configuration']
-    for case in inputs['cases']:
-        if case['id'] in answers:
-            continue
-        try:
-            validate(case['reference'])
-        except (ValueError, TypeError, KeyError):
-            continue
-        limit = config.get('limits', {}).get('phase_seconds', config.get('request_seconds', 120))
-        output = run.path / 'evaluation' / 'capture' / binding(case['id'])
-        if output.exists():
-            # Keep interrupted capture and start a distinct attempt folder.
-            attempt = 1
-            while (output / str(attempt)).exists():
-                attempt += 1
-            output = output / str(attempt)
-        run.reserve(case['id'], limit)
-        started = time.monotonic()
-        try:
-            answer = generator(case['messages'], output, config)
-        except Exception as error:
-            answer = dict(status='FAILED', text='', token_ids=[], error=type(error).__name__)
-        elapsed = time.monotonic() - started
-        if not isinstance(answer, dict) or not isinstance(answer.get('text'), str) or not isinstance(answer.get('status'), str) or answer['status'] in {'', 'STARTED'}:
-            raise ValueError('Runtime returned an invalid answer envelope')
-        saved = dict(binding=answer_binding(inputs, case, answer), answer=answer, elapsed_seconds=elapsed)
-        atomic_json(run.path / 'evaluation' / 'results' / (binding(case['id']) + '.json'), saved)
-        run.settle(case['id'], elapsed)
-    return load_answers(run, inputs)
 
 
 def review_template(inputs, case, answer):

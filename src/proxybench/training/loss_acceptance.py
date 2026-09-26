@@ -199,7 +199,7 @@ def compare_continuation(root):
         initial.append(json.loads((folder / 'initial-weights.json').read_text()))
     assert_same(identities[0], identities[1])
     assert_same(initial[0], initial[1])
-    runtime_identities = [state.get('diagnostics', {}).get('runtime_identity') for state in states]
+    runtime_identities = [state['diagnostics']['runtime_identity'] for state in states]
     if any(identity is None for identity in runtime_identities):
         raise ValueError('Continuation acceptance requires recorded runtime identities in both checkpoints')
     from proxybench.training.measurements import compare_runtime_identity

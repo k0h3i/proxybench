@@ -176,6 +176,8 @@ def _train(dataset, run_dir, config, resume, measurements):
         completed = accepted['completed']
         saved = (load_state(accepted['checkpoint'], identity=identity, order=order, completed=completed)
                  if resume else None)
+        prior_runtime = saved['diagnostics']['runtime_identity'] if saved else None
+        origin_runtime = saved['diagnostics']['origin_runtime_identity'] if saved else None
     epochs = [len(rows['training']) * epoch for epoch in range(1, config['epochs'] + 1)]
     counters = dict(global_step=completed, sample_position=completed, planned_updates=len(order),
                     epoch_boundaries=epochs, batch_size=config['batch_size'],
@@ -237,11 +239,9 @@ def _train(dataset, run_dir, config, resume, measurements):
                    training_loop='custom'),
         tokenizer=tokenizer_identity(snapshot), optimizer=optimizer_identity(model, optimizer),
         hardware=hardware, kernels=kernels)
-    prior_runtime = saved.get('diagnostics', {}).get('runtime_identity') if saved else None
     runtime_comparison = compare_runtime_identity(prior_runtime, runtime)
     record = dict(runtime_identity=runtime, comparison=runtime_comparison,
-                  origin_runtime_identity=(saved.get('diagnostics', {}).get('origin_runtime_identity', prior_runtime)
-                                           if saved else runtime))
+                  origin_runtime_identity=origin_runtime if saved else runtime)
     attempts = output / 'training-attempts'
     attempts.mkdir(exist_ok=True)
     durable_json(attempts / (measurements.attempt_id + '.json'), record)

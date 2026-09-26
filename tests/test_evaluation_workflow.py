@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from proxybench.evaluation.workflow import (create_run, load_inputs, load_answers, generate, report,
+from proxybench.evaluation.workflow import (create_run, load_inputs, load_answers, report,
                                            import_review, review_template, answer_binding)
 from proxybench.runstate import Run, atomic_json, binding
 from proxybench.training.labels import TYPES
@@ -40,15 +40,22 @@ class EvaluationWorkflowTests(unittest.TestCase):
         self.reference = label()
         self.inputs = dict(identity=dict(dataset='d', model='m', prompt='p', runtime='r'),
                            cases=[dict(id='one', reference=self.reference, source_cells=[dict(block_index=0, cell_index=0, text='<script>bad()</script>')], messages=[])])
-        self.config = dict(request_seconds=5, total_seconds=15)
+        self.config = dict(limits=dict(phase_seconds=5, total_seconds=15))
         create_run(self.path, self.inputs, self.config)
 
     def answer(self):
         return dict(status='COMPLETE', text=json.dumps(self.reference), token_ids=[1])
 
+    def save_answer(self, run, answer):
+        case = self.inputs['cases'][0]
+        atomic_json(self.path / 'evaluation/results' / f'{binding(case["id"])}.json',
+                    dict(binding=answer_binding(self.inputs, case, answer), answer=answer,
+                         elapsed_seconds=0, session='session-' + '0' * 32))
+        return load_answers(run, self.inputs)
+
     def test_review_repeat_conflict_and_model_free_report(self):
         with Run(self.path) as run:
-            answers = generate(run, self.inputs, lambda *a: self.answer())
+            answers = self.save_answer(run, self.answer())
             result = report(run, self.inputs, answers)
             self.assertEqual(result['status'], 'PENDING_REVIEW')
             page = (self.path/'evaluation/review/index.html').read_text()
@@ -72,7 +79,7 @@ class EvaluationWorkflowTests(unittest.TestCase):
     def test_failures_count_and_missing_is_incomplete(self):
         with Run(self.path) as run:
             self.assertEqual(report(run, self.inputs, {})['status'], 'INCOMPLETE')
-            answers = generate(run, self.inputs, lambda *a: dict(status='TIMEOUT',text='',error='timeout'))
+            answers = self.save_answer(run, dict(status='TIMEOUT', text='', error='timeout'))
             result = report(run, self.inputs, answers)
             self.assertTrue(result['valid_accuracy'])
             self.assertEqual(result['targets'], 1)
@@ -86,22 +93,6 @@ class EvaluationWorkflowTests(unittest.TestCase):
             self.assertEqual(result['status'], 'INVALID_REFERENCES')
             self.assertFalse(result['valid_accuracy'])
 
-    def test_crash_recovers_saved_answer_and_resource_charge(self):
-        with Run(self.path) as run:
-            run.reserve('one', 5)
-            answer = self.answer()
-            atomic_json(self.path/'evaluation/results'/f'{binding("one")}.json',
-                        dict(binding=answer_binding(self.inputs,self.inputs['cases'][0],answer),answer=answer,elapsed_seconds=3))
-        with Run(self.path) as run:
-            answers = generate(run, self.inputs, lambda *a: self.fail('Repeated generation'))
-            self.assertIn('one', answers)
-            self.assertEqual(run.state['consumed_seconds'], 3)
-            run.reserve('two', 5)
-        with Run(self.path) as run:
-            self.assertEqual(run.state['consumed_seconds'], 8)
-            with self.assertRaises(ValueError):
-                run.reserve('three', 10)
-
     def test_one_writer_overwrite_and_stale_answer(self):
         with self.assertRaises(FileExistsError):
             create_run(self.path, self.inputs, self.config)
@@ -109,21 +100,11 @@ class EvaluationWorkflowTests(unittest.TestCase):
             with self.assertRaises(BlockingIOError):
                 with Run(self.path):
                     pass
-            generate(run, self.inputs, lambda *a: self.answer())
+            self.save_answer(run, self.answer())
             changed = deepcopy(self.inputs)
             changed['identity']['model'] = 'changed'
             with self.assertRaises(ValueError):
                 load_answers(run, changed)
-
-    def test_raw_capture_recovers_without_model(self):
-        with Run(self.path) as run:
-            run.reserve('one', 5)
-            folder = self.path/'evaluation/capture'/binding('one')
-            atomic_json(folder/'request.json', dict(messages=[[]], config=self.config))
-            atomic_json(folder/'answers/answer-0.json', self.answer())
-            answers = generate(run, self.inputs, lambda *a: self.fail('Repeated captured answer'))
-            self.assertEqual(answers['one'], self.answer())
-            self.assertEqual(run.state['consumed_seconds'], 5)
 
     def test_source_values_and_cell_boundaries(self):
         from proxybench.evaluation.answers import score_system
@@ -140,64 +121,10 @@ class EvaluationWorkflowTests(unittest.TestCase):
         import subprocess
         import sys
         with Run(self.path) as run:
-            generate(run, self.inputs, lambda *a: dict(status='TIMEOUT', text=''))
+            self.save_answer(run, dict(status='TIMEOUT', text=''))
         process = subprocess.run([sys.executable, '-m', 'proxybench', 'evaluate', '--run-dir', str(self.path), '--report-only', '--json'], capture_output=True, text=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(json.loads(process.stdout)['status'], 'COMPLETE')
-
-    def test_active_capture_blocks_retry_and_cached_recovery(self):
-        import os
-        import time
-        folder = self.path/'evaluation/capture'/binding('one')
-        atomic_json(folder/'request.json', dict(messages=[[]], config=self.config))
-        atomic_json(folder/'answers/answer-0.json', self.answer())
-        active = dict(execution_id='active', supervisor_pid=os.getpid(),
-                      boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
-                      started_monotonic=time.monotonic(), started_wall=time.time(), run=str(folder))
-        atomic_json(folder/'resources.active.json', active)
-        with Run(self.path) as run:
-            run.reserve('one', 5)
-            for loader in (lambda: generate(run, self.inputs, lambda *a: self.fail('Started another worker')),
-                           lambda: load_answers(run, self.inputs)):
-                with self.assertRaisesRegex(ValueError, 'supervisor still exists'):
-                    loader()
-            self.assertEqual(run.state['consumed_seconds'], 5)
-            self.assertFalse((self.path/'evaluation/results').exists())
-            (folder/'resources.active.json').unlink()
-            (folder/'resources.lock').write_text('unresolved')
-            with self.assertRaisesRegex(ValueError, 'Unresolved execution lock'):
-                generate(run, self.inputs, lambda *a: self.fail('Ignored execution lock'))
-
-    def test_dead_capture_usage_exceeding_reservation_survives_resume(self):
-        import time
-        folder = self.path/'evaluation/capture'/binding('one')
-        atomic_json(folder/'request.json', dict(messages=[[]], config=self.config))
-        atomic_json(folder/'answers/answer-0.json', self.answer())
-        atomic_json(folder/'resources.active.json', dict(execution_id='dead', supervisor_pid=999999999,
-                    boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
-                    started_monotonic=time.monotonic()-12, started_wall=time.time()-12, run=str(folder)))
-        with Run(self.path) as run:
-            run.reserve('one', 5)
-            answers = generate(run, self.inputs, lambda *a: self.fail('Repeated captured answer'))
-            self.assertEqual(answers['one'], self.answer())
-            charged = run.state['consumed_seconds']
-            self.assertGreaterEqual(charged, 12)
-        with Run(self.path) as run:
-            load_answers(run, self.inputs)
-            self.assertEqual(run.state['consumed_seconds'], charged)
-            with self.assertRaisesRegex(ValueError, 'cumulative run time limit'):
-                run.reserve('two', 5)
-        entries = (folder/'resources.jsonl').read_text().splitlines()
-        self.assertEqual(len(entries), 1)
-
-    def test_interrupted_runtime_output_is_not_a_terminal_failure(self):
-        with Run(self.path) as run:
-            with self.assertRaisesRegex(ValueError, 'invalid answer envelope'):
-                generate(run, self.inputs, lambda *a: dict(status='STARTED', text=''))
-            answers = load_answers(run, self.inputs)
-            self.assertEqual(answers, {})
-            self.assertEqual(report(run, self.inputs, answers)['status'], 'INCOMPLETE')
-            self.assertEqual(run.state['consumed_seconds'], 5)
 
     def training_export_state(self, *, used):
         from proxybench.execution.resources import append_entry
