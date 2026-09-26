@@ -88,6 +88,7 @@ Those cases appear in separate rows to avoid assigning one status to different c
 | 15. Trial Trainer or SFTTrainer with prepared examples | Experiment requiring measurement | Plain Trainer is the smaller initial candidate. Preserve preparation and implement an actual no-logit forward/loss path. Installed imports pass, but GPU integration remains untested. |
 | 15. Assume `compute_loss_func` avoids full output scores | Unsupported or inapplicable | Installed Trainer calls the model before this callback. SFTTrainer also reads logits for entropy and accuracy unless its Liger path applies. |
 | 16. Follow the proposed order | Intentional tradeoff worth reconsidering | Repair resume first, then add measurements and loss acceptance. Reuse existing evaluation evidence. Keep experiments, save policy, and migration separate. |
+| 17. Improve the training display | Confirmed issue | The current output omits epoch progress and uses incomplete timing for its estimate. Follow Hugging Face counter conventions in a separate display and measurement patch. |
 
 ## Smallest coherent first patch
 
@@ -170,6 +171,83 @@ A trainer migration has limited value if it requires copying the upstream traini
 Prefer supported overrides and callbacks, then measure how much project code they actually remove.
 If those extensions cannot preserve update and recovery boundaries, keep the custom loop or consider a narrower Accelerate integration.
 No speed claim is justified until matched runs retain the same initialization, order, workload, backend, save cadence, and extraction evaluation.
+
+## Training display recommendation
+
+Use Hugging Face progress conventions for the terminal display.
+An epoch is one pass through the training examples.
+An optimizer update applies the calculated gradients to trainable parameters.
+Hugging Face defines `global_step` as completed optimizer updates and `epoch` as completed epochs plus fractional progress.
+Its `ProgressCallback` displays progress, while `PrinterCallback` prints logs.
+These are documented conventions, not a mandatory screen layout. See the [Hugging Face callback documentation](https://huggingface.co/docs/transformers/main_classes/callback#transformers.TrainerState).
+
+The installed Transformers 5.5.0 `trainer_callback.py:35–58` confirms those counter meanings.
+Its `ProgressCallback` at lines 624–695 advances a `tqdm` bar using `global_step` and `max_steps`.
+The version-specific online callback page was unavailable, so the installed source supplies the version-specific comparison.
+The [TRL 0.24.0 metric documentation](https://huggingface.co/docs/trl/v0.24.0/en/sft_trainer#logged-metrics) lists loss, epoch, update count, learning rate, token count, and gradient norm.
+Adopt useful fields without adding its logits-based metrics to the efficient loss path.
+
+The current [loop output](../src/proxybench/training/trajectory.py) reports steps, losses, learning rate, elapsed time, an estimate, and memory.
+It does not show epoch progress or batch configuration.
+The [supervisor](../src/proxybench/execution/live.py) separately prints phase and resource-budget heartbeats.
+Consolidate their visible status into one display while preserving saved worker output and safety messages.
+This display improvement does not require a Trainer migration.
+
+Use these display fields:
+
+| Field | Proposed meaning |
+|---|---|
+| Phase | Preparation, loading, training, saving checkpoint, validating final adapter, or publishing final adapter. Show the actual active operation. |
+| Epoch | Current epoch and total epochs, plus completion within that epoch. Store fractional epoch progress separately for logs. |
+| Updates | Completed optimizer updates divided by planned updates, plus a percentage. Baseline total: 660. |
+| Examples | Completed examples in the current epoch divided by its size. Baseline size: 330. Derive this from sample position when batching exists. |
+| Batch configuration | Physical batch size, accumulation count, and effective batch size. Show once at startup and resume, and keep it available in detailed status. |
+| Training loss | Latest update loss and the existing response-token-weighted mean over the last 12 updates. Label the window and weighting explicitly. |
+| Learning rate and gradient norm | Current learning rate and the gradient norm before clipping. Reuse existing values rather than calculating gradients again. |
+| Time | Elapsed time for this attempt, cumulative charged time, remaining resource budget, and a labeled estimate of remaining loop time. |
+| Throughput | Non-padding sequence tokens per second and supervised response tokens per second. State the measurement window in detailed output. |
+| Memory | Current allocated memory, peak allocated/reserved memory, and free device memory. Keep units consistent. |
+| Last save | Last fully published checkpoint and its update number. Display resume eligibility separately, based on the clean-stop validator. |
+
+This example shows the baseline after update 396, with 66 examples completed in the second epoch.
+The numbers represent counters only, not a measured training run.
+Loss, time, and memory fields appear when measurements are available.
+
+```text
+Phase: training
+Epoch 2/2: 20% complete (66/330 examples)
+Optimizer updates: 396/660 (60%)
+Batch: 1 example | Accumulation: 1 | Effective batch: 1 example
+```
+
+At this position, the fractional epoch value is `1.20`.
+At update 330, report epoch 1 complete and fractional epoch `1.00`.
+At update 660, report epoch 2 complete and fractional epoch `2.00`.
+Do not derive epoch progress from update count after introducing unequal or partial accumulation windows.
+Use the recorded sample position and actual epoch boundaries instead.
+
+The display patch needs these behaviors:
+
+1. Let the supervisor own terminal rendering because it captures worker output through pipes.
+2. Use a compact progress bar for an interactive terminal and plain lines for redirected output.
+3. Refresh the interactive display at most once per second, with immediate phase, stop, failure, and completion messages.
+4. Print plain progress summaries every 10 completed updates and at epoch boundaries, without changing per-update history.
+5. Restore counters from accepted resume state before showing progress, and start attempt timing from the new launch.
+6. Show `estimating` until complete-loop timing supports an estimate, and label final-publication time as excluded until separately estimated.
+7. Keep the phase active during checkpoint saving and final publication, even when the update bar reaches 100%.
+8. Show successful completion only after final validation, artifact publication, and the worker result succeed.
+
+The refresh and summary intervals above are proposed project defaults, not Hugging Face requirements.
+Keep safety monitoring, durable journal writes, and checkpoint cadence independent from display frequency.
+Do not infer resume eligibility from a checkpoint's existence or a progress percentage.
+Optional display measurements must not introduce extra per-update GPU synchronization solely to refresh the screen.
+
+Accept the display patch with CPU tests and a simulated clock.
+Cover initial state, updates 329/330/331 and 659/660, resumed counters, missing measurements, phase changes, and a failed final publication.
+Test terminal and redirected output, long saves, time-budget stops, and preservation of saved output when terminal output is slow.
+If accumulation is later introduced, test distinct sample, microbatch, and optimizer counters, including the last partial window.
+A microbatch is one forward-and-backward batch within accumulation.
+Keep this patch after resume safety and alongside complete timing, without changing the training recipe or recovery policy.
 
 ## Measurements and acceptance after the first patch
 
