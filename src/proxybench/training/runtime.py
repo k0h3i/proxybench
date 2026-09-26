@@ -293,7 +293,7 @@ def _train(dataset, run_dir, config, resume, measurements, *, training_loop='cus
               last_checkpoint=dict(path=str(path), global_step=step), resume_eligible=False)
         return path
 
-    phase('training', measurements=measurements, **counters)
+    phase('training', measurements=measurements, **dict(counters, resume_eligible=False))
     with measurements.stage('full_loop'):
         result = train_updates(model, optimizer, order, loss, journal, start=completed, history=history,
                                stop=stopping, save=save, checkpoint_interval=config['checkpoint_interval'],

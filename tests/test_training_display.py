@@ -56,6 +56,8 @@ class TrainingDisplayTests(unittest.TestCase):
         self.assertIn('Batch: 1 | Accumulation: 1 | Effective batch: 1', text)
         self.assertIn('checkpoints/396 at update 396', text)
         self.assertIn('Resume eligible: yes (validated clean stop)', text)
+        self.display.accept(event(phase='training', resume_eligible=False))
+        self.assertIn('Resume eligible: no', self.display.details())
 
     def test_missing_measurements_never_invent_zero_or_eta(self):
         self.display.accept(initial())
