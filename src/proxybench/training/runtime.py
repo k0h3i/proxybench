@@ -144,12 +144,12 @@ def attach_adapter(model, config, output):
     return model
 
 
-def train(dataset, run_dir, config, resume=False, *, training_loop='custom'):
+def train(dataset, run_dir, config, resume=False):
     """Worker API. Resume only a trusted local checkpoint after a clean stop."""
     from proxybench.training.measurements import MeasurementRecorder, event_line
     measurements = MeasurementRecorder(emit=lambda event: print(event_line(event), flush=True))
     try:
-        result = _train(dataset, run_dir, config, resume, measurements, training_loop=training_loop)
+        result = _train(dataset, run_dir, config, resume, measurements)
     except BaseException:
         measurements.finish('FAILED')
         raise
@@ -164,16 +164,14 @@ def train(dataset, run_dir, config, resume=False, *, training_loop='custom'):
             durable_json(Path(capture).parent / 'training-measurements.json', measurements.snapshot())
 
 
-def _train(dataset, run_dir, config, resume, measurements, *, training_loop='custom'):
+def _train(dataset, run_dir, config, resume, measurements):
     from proxybench.training.resume import training_preflight
     from proxybench.training.trajectory import load_state, restore_loaded_state, publish_state, train_updates, require_clean_stop
     from proxybench.training.measurements import capture_runtime_identity, compare_runtime_identity
     from proxybench.training.runtime_facts import optimizer_identity, device_and_kernels, DeviceComputeTimer
     phase('preparation', measurements=measurements)
     with measurements.stage('preparation'):
-        accepted = training_preflight(dataset, run_dir, config, resume=resume, training_loop=training_loop)
-        if getattr(train_updates, '_proxybench_training_loop', 'custom') != training_loop:
-            raise ValueError('The active training loop differs from the requested experiment')
+        accepted = training_preflight(dataset, run_dir, config, resume=resume)
         rows, identity, order = accepted['rows'], accepted['identity'], accepted['order']
         completed = accepted['completed']
         saved = (load_state(accepted['checkpoint'], identity=identity, order=order, completed=completed)
@@ -236,7 +234,7 @@ def _train(dataset, run_dir, config, resume, measurements, *, training_loop='cus
     runtime = capture_runtime_identity(
         model=dict(model_id=config['model_id'], revision=config['model_revision'],
                    manifest_sha256=BASE_MANIFEST_SHA256, architecture=type(base).__name__,
-                   training_loop=training_loop),
+                   training_loop='custom'),
         tokenizer=tokenizer_identity(snapshot), optimizer=optimizer_identity(model, optimizer),
         hardware=hardware, kernels=kernels)
     prior_runtime = saved.get('diagnostics', {}).get('runtime_identity') if saved else None
@@ -478,7 +476,7 @@ def training_status(root, status):
     return status
 
 
-def resume_training(run_dir, *, training_loop='custom'):
+def resume_training(run_dir):
     from proxybench.runstate import Run
     from proxybench.training.resume import training_preflight
     with Run(run_dir) as run:
@@ -487,8 +485,7 @@ def resume_training(run_dir, *, training_loop='custom'):
         config = run.state.get('configuration')
         if not isinstance(run.state.get('dataset'), str) or not run.state['dataset']:
             raise ValueError('Training run dataset path is missing or invalid')
-        training_preflight(run.state['dataset'], run_dir, config, resume=True, run_state=run.state,
-                           training_loop=training_loop)
+        training_preflight(run.state['dataset'], run_dir, config, resume=True, run_state=run.state)
         from proxybench.execution.resources import ledger_entries
         resource_floor(run)
         root_used = sum(row['elapsed_seconds'] for row in ledger_entries(Path(run_dir)/'resources.jsonl'))
@@ -586,12 +583,10 @@ def add_cli(subparsers):
         p.set_defaults(handler=cli)
 
 
-def cli(args, *, training_loop='custom'):
+def cli(args):
     from proxybench.runstate import Run
     from proxybench.execution.resources import ledger_entries
     config = load_config(args.config)
-    if training_loop != 'custom':
-        config = dict(config, training_loop=training_loop)
     if getattr(args, 'model', None):
         config['model'] = str(Path(args.model).resolve())
     operation = 'infer' if hasattr(args, 'input') else 'train' if hasattr(args, 'dataset') else 'export'
@@ -625,8 +620,7 @@ def cli(args, *, training_loop='custom'):
                 infer_run(run)
             elif operation == 'train':
                 from proxybench.training.resume import training_preflight
-                training_preflight(run.state['dataset'], args.run_dir, config, run_state=run.state,
-                                   training_loop=training_loop)
+                training_preflight(run.state['dataset'], args.run_dir, config, run_state=run.state)
                 status = launch(operation, args.run_dir, config, dataset=run.state['dataset'], resume=False)
                 run.state['status'] = training_status(args.run_dir, status)
             else:

@@ -85,9 +85,6 @@ Even a matching identity does not establish CUDA continuation by itself.
 
 At 100 percent of updates, final validation and publication can still be active.
 The display reports success only after publication, the worker result, and the worker process succeed.
-The [training acceptance guide](training-acceptance.md) describes separate loss and continuation checks.
-The [Trainer experiment guide](trainer-experiment.md) describes the separate candidate and its pending adoption tests.
-The [implementation evidence](training-implementation.md) records CPU results and unresolved policy decisions.
 
 ## Selected-model evaluation
 
