@@ -25,7 +25,7 @@ STAGES = frozenset({
     'measurement_overhead',
 })
 PACKAGES = ('torch', 'transformers', 'unsloth', 'unsloth-zoo', 'peft', 'accelerate',
-            'triton', 'cut-cross-entropy', 'numpy', 'safetensors')
+            'triton', 'cut-cross-entropy', 'causal-conv1d', 'numpy', 'safetensors')
 
 
 def _seconds(value):

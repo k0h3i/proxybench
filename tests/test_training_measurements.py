@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from proxybench.training.measurements import (
-    EVENT_PREFIX, MeasurementRecorder, capture_runtime_identity, compare_runtime_identity,
+    EVENT_PREFIX, PACKAGES, MeasurementRecorder, capture_runtime_identity, compare_runtime_identity,
     epoch_progress, event_line, parse_event,
 )
 
@@ -215,6 +215,20 @@ class RuntimeIdentityTests(unittest.TestCase):
             result = self.capture(tmp, package_version=missing)
             self.assertIsNone(result['packages']['synthetic'])
             self.assertEqual(compare_runtime_identity(result, result)['status'], 'UNVERIFIED')
+
+    def test_convolution_install_changes_identity_without_rewriting_old_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp)/'worker.py').write_text('value = 1\n')
+            current = self.capture(tmp, package_names=PACKAGES)
+            self.assertEqual(current['packages']['causal-conv1d'], '1.0')
+            previous = current | {'packages': {
+                name: version for name, version in current['packages'].items()
+                if name != 'causal-conv1d'}}
+            comparison = compare_runtime_identity(previous, current)
+            self.assertEqual(comparison['status'], 'CHANGED')
+            self.assertEqual(comparison['changed'], ['packages'])
+            self.assertTrue(comparison['requires_acceptance'])
+            self.assertNotIn('causal-conv1d', previous['packages'])
 
     def test_capture_copies_caller_details(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -83,7 +83,12 @@ The [uv Python guide](https://docs.astral.sh/uv/guides/install-python/) describe
 PROXYBENCH_PYTHON="$("$HOME/.local/bin/uv" python find --managed-python 3.12.14)"
 "$PROXYBENCH_PYTHON" -m venv .venv
 .venv/bin/python --version
-.venv/bin/python -m pip install -r configs/requirements-training.txt
+.venv/bin/python -m pip install -r configs/requirements-training-build.txt
+.venv/bin/python -m pip install --no-deps --upgrade --target .venv/cuda-build -r configs/requirements-cuda-build.txt
+ln -sfn libcudart.so.13 .venv/cuda-build/nvidia/cu13/lib/libcudart.so
+CUDA_VISIBLE_DEVICES='' CUDA_HOME="$PWD/.venv/cuda-build/nvidia/cu13" \
+  PATH="$PWD/.venv/bin:$PATH" MAX_JOBS=2 CAUSAL_CONV1D_FORCE_BUILD=TRUE \
+  timeout 900 .venv/bin/python -m pip install --no-build-isolation -r configs/requirements-training.txt
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m pip check
 ```
@@ -91,6 +96,20 @@ PROXYBENCH_PYTHON="$("$HOME/.local/bin/uv" python find --managed-python 3.12.14)
 If you supplied Python 3.12.14 another way, replace the first command with its absolute executable path.
 Keep the recorded package versions.
 Resolve a failed installation before continuing to model work.
+
+The [build prerequisites](../configs/requirements-training-build.txt) use the exact versions in the training requirements.
+They provide Torch and Ninja before the source build starts.
+The [CUDA build requirements](../configs/requirements-cuda-build.txt) provide a complete CUDA 13.2 compiler toolchain in `.venv/cuda-build/`.
+This separate directory keeps the compiler and headers compatible while the Torch runtime libraries retain their existing pins.
+The symbolic link supplies the library filename required by the linker.
+
+[`causal-conv1d` 1.7.0](https://github.com/Dao-AILab/causal-conv1d/releases/tag/v1.7.0) has no official wheel for the pinned Torch 2.12 environment.
+A wheel is a compiled Python package.
+The command builds this package locally with two build jobs and a 15-minute limit.
+`--no-build-isolation` uses the installed Torch version during compilation.
+The build does not need access to a GPU.
+The CUDA compiler and its headers remain inside `.venv/`.
+
 For CPU source preparation alone, the package supports Python 3.11 or later without the model requirements file.
 
 ## Install llama.cpp and its CUDA libraries

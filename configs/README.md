@@ -4,7 +4,12 @@
 `base-model.json` records the pinned base revision and SHA-256 hashes for its files.
 `inference.json` records the supported llama.cpp version and generation controls.
 `model-system-prompt.txt` contains the exact canonical prompt bytes.
+
 `requirements-training.txt` pins Python model packages for `.venv/`.
+`requirements-training-build.txt` selects the packages needed before the convolution source build.
+`requirements-cuda-build.txt` pins the separate compiler toolchain inside `.venv/cuda-build/`.
+Follow the installation order in the [preparation guide](../docs/preparation.md).
+
 `requirements-llama-cuda.txt` pins CUDA 12 libraries for the native llama.cpp runtime.
 Install those libraries into a separate target through the [preparation guide](../docs/preparation.md).
 The guide also installs the llama.cpp executable, compiler, and required system libraries.

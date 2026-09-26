@@ -72,16 +72,29 @@ Exact CUDA continuation remains unaccepted until a separate investigation resolv
 
 ## Optional acceleration warning
 
-The pinned environment does not include `causal-conv1d`.
-The generated Qwen implementation therefore uses Torch for that convolution path.
+The environment for these runs did not include `causal-conv1d`.
+The generated Qwen implementation therefore used Torch for that convolution path.
 Unsloth supplies bundled flash-linear-attention code, and this run compiled its forward and backward kernels.
 The Transformers warning covers several optional functions and appears when any one is absent.
 It does not mean that all linear-attention operations use the Torch fallback.
 
 The pinned preparation procedure did not audit every optional acceleration package.
 No incompatibility with `causal-conv1d` was established during this run.
-Adding it requires a separate environment and performance comparison.
+Later package changes do not alter these recorded results.
+Performance and continuation acceptance require new comparisons after a package change.
 The warning alone does not explain the observed continuation differences.
+
+After these runs, `causal-conv1d==1.7.0` was installed with the [pinned build procedure](preparation.md).
+All 101 existing distribution versions stayed unchanged.
+The final CPU suite passed all 196 tests without skips from a clean source snapshot.
+The package consistency test and every training requirement pin also passed.
+
+A bounded GPU installation test passed four synthetic cases on the RTX 3090.
+The cases covered FP32 and BF16 with two memory layouts, forward output, input and parameter gradients, and incremental updates.
+The relative norm error limits were `2e-5` for FP32 and `0.02` for BF16.
+All four Qwen fast-path functions resolved, and `is_fast_path_available` returned `True`.
+The test took 9.18 seconds and allocated at most 8,573,440 bytes through Torch.
+These installation tests do not establish a training speed improvement or resolve the earlier continuation failure.
 
 ## Retained evidence
 
@@ -91,6 +104,7 @@ Their identifiers are listed below:
 - `loss-acceptance-20260926T1603`: Original harness failure and resource charge.
 - `loss-acceptance-20260926T2005`: Corrected loss report with 20 passing cases.
 - `continuation-acceptance-20260926T2008`: Three clean worker exits and the failed exact comparison.
+- `causal-conv1d-installation-20260926T204756`: Installation test script, GPU report, build log, and final CPU results.
 
 The [acceptance guide](training-acceptance.md) describes the commands and their limits.
 The [implementation report](training-implementation.md) records the preceding CPU evidence.

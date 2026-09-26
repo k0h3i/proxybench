@@ -1,0 +1,6 @@
+# Install into .venv/cuda-build, outside the Torch runtime package directory.
+nvidia-cuda-cccl==13.2.27
+nvidia-cuda-crt==13.2.51
+nvidia-cuda-nvcc==13.2.51
+nvidia-cuda-runtime==13.2.51
+nvidia-nvvm==13.2.51

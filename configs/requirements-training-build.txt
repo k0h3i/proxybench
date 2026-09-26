@@ -1,0 +1,7 @@
+# Resolve build prerequisites against the same exact training pins.
+-c requirements-training.txt
+torch
+packaging
+setuptools
+wheel
+ninja
