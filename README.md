@@ -1,5 +1,11 @@
 # ProxyBench
 
+[![Code License: Apache 2.0](https://img.shields.io/badge/Code_License-Apache_2.0-green.svg)](LICENSE)
+[![Data: Private](https://img.shields.io/badge/Data-Private-red.svg)](DATA_NOTICE.md)
+[![Model Weights: Private](https://img.shields.io/badge/Model_Weights-Private-yellow.svg)](MODEL_CARD.md#license-access-and-references)
+[![CPU Python: 3.11+](https://img.shields.io/badge/CPU_Python-3.11%2B-blue.svg)](pyproject.toml)
+[![Model Python: 3.12.14](https://img.shields.io/badge/Model_Python-3.12.14-blue.svg)](docs/preparation.md#required-software-and-inputs)
+
 ProxyBench extracts structured proxy-voting records from historical SEC Form N-PX text and HTML.
 Each input contains one manually marked voting target and its surrounding source context.
 ProxyType-4B is the working name for the project's trained Qwen3.5-4B model.
