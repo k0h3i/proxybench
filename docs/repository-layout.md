@@ -26,6 +26,7 @@ Their manifests preserve source identity, labels, and split restrictions.
 
 Keep selected models under `artifacts/models/ProxyType-4B/`.
 The folder contains `adapter/`, `model-bf16.gguf`, and `model-info.json`.
+A selected model can also retain its reviewed report and audit under `evaluation/`.
 Keep the pinned BF16 base under `artifacts/models/Qwen3.5-4B/`.
 Adapter loading and base-model comparisons share that copy.
 [base-model.json](../configs/base-model.json) records its exact revision and file hashes.
