@@ -298,3 +298,31 @@ Code, source filings, accepted labels, and model weights have separate rights an
 The [data notice](DATA_NOTICE.md) describes the private source collection and current distribution status.
 The [release guide](docs/release.md) covers the required review and approval before publication.
 The [security policy](SECURITY.md) explains how to handle untrusted filings and report sensitive material.
+
+## Acknowledgments and references
+
+ProxyBench builds on the work of the Qwen, Unsloth, Hugging Face, PyTorch, and llama.cpp teams and the researchers listed below.
+The table identifies their roles in this project and links their papers or software citation entries.
+The [pinned dependencies](configs/requirements-training.txt) record the Python package versions used here.
+
+| Upstream work | Role in ProxyBench | Reference |
+|---|---|---|
+| [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | Base model for ProxyType-4B. | Qwen Team (2026), [Qwen3.5: Towards Native Multimodal Agents](https://huggingface.co/Qwen/Qwen3.5-4B#citation). |
+| [Unsloth](https://github.com/unslothai/unsloth) | Model loading and LoRA training support. | Daniel Han, Michael Han, and the Unsloth team (2023), [Unsloth software citation](https://github.com/unslothai/unsloth#citation). |
+| [Unsloth Zoo](https://github.com/unslothai/unsloth-zoo) | Training utilities and loss computation. | The Unsloth Zoo contributors, [project repository](https://github.com/unslothai/unsloth-zoo). |
+| [Hugging Face Transformers](https://github.com/huggingface/transformers) | Model definitions, tokenization, and chat formatting. | Wolf et al. (2020), [Transformers: State-of-the-Art Natural Language Processing](https://aclanthology.org/2020.emnlp-demos.6/). |
+| [Hugging Face PEFT](https://github.com/huggingface/peft) | LoRA adapter creation, loading, and saved state. | Mangrulkar et al. (2022), [PEFT software citation](https://github.com/huggingface/peft#citing--peft). |
+| LoRA | Method used to train the adapters. | Hu et al. (2022), [LoRA: Low-Rank Adaptation of Large Language Models](https://openreview.net/forum?id=nZeVKeeFYf9). |
+| [PyTorch](https://github.com/pytorch/pytorch) | Model computation and training updates. | Ansel et al. (2024), [PyTorch 2](https://doi.org/10.1145/3620665.3640366), the project's [preferred citation](https://github.com/pytorch/pytorch/blob/main/CITATION.cff). |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) | GGUF conversion and local inference. | The ggml authors and contributors, [project repository](https://github.com/ggml-org/llama.cpp). |
+| [Cut Cross-Entropy](https://github.com/apple/ml-cross-entropy) | Loss computation through Unsloth Zoo. | Wijmans et al. (2025), [Cut Your Losses in Large-Vocabulary Language Models](https://github.com/apple/ml-cross-entropy#citation). |
+| [causal-conv1d](https://github.com/Dao-AILab/causal-conv1d) | GPU convolution operations used by the Qwen training stack. | Tri Dao and contributors, [project repository](https://github.com/Dao-AILab/causal-conv1d). |
+
+We also acknowledge [Hugging Face Hub](https://github.com/huggingface/huggingface_hub) for model downloads and [Safetensors](https://github.com/huggingface/safetensors) for model weight storage.
+The [data notice](DATA_NOTICE.md) records the separate source attribution for SEC filings.
+
+Citations credit upstream work and do not replace license obligations.
+The pinned Qwen weights use [Apache 2.0](https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/LICENSE).
+Unsloth Core and Unsloth Zoo have separate [Core](https://github.com/unslothai/unsloth#license) and [Zoo](https://github.com/unslothai/unsloth-zoo/blob/main/LICENSE) license terms.
+Before redistribution, follow each applicable license for notices, attribution, source availability, and modified files.
+The [release procedure](docs/release.md) covers review of the exact files selected for publication.
