@@ -7,7 +7,8 @@ import tempfile
 import unittest
 
 from proxybench.training.trajectory import (assert_same, publish_state, require_clean_stop,
-                                           restore_state, sample_order, train_updates, weighted_loss)
+                                           restore_state, load_state, restore_loaded_state,
+                                           sample_order, train_updates, weighted_loss)
 
 
 class TrajectoryTests(unittest.TestCase):
@@ -51,10 +52,11 @@ class TrajectoryTests(unittest.TestCase):
                        save=save, report=lambda _: None)
             journal = json.loads((root/'part.json').read_text())
             self.assertEqual(require_clean_stop(journal, checkpoint, {'run': 'one'}), 7)
+            saved = load_state(checkpoint, identity={'run': 'one'}, order=order, completed=7)
             resumed, resumed_opt, loss = self.build()
             # Deliberately consume each RNG after initialization.
             random.random(); self.np.random.random(); self.torch.rand(2)
-            restored = restore_state(resumed, resumed_opt, checkpoint, identity={'run': 'one'}, order=order, completed=7)
+            restored = restore_loaded_state(resumed, resumed_opt, saved, order=order, completed=7)
             result = train_updates(resumed, resumed_opt, order, loss, root/'part.json', start=7,
                                    history=restored['history'], report=lambda _: None)
             assert_same(full.state_dict(), resumed.state_dict())

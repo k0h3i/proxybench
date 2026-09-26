@@ -143,25 +143,26 @@ def attach_adapter(model, config, output):
 
 def train(dataset, run_dir, config, resume=False):
     """Worker API. Resume only a trusted local checkpoint after a clean stop."""
+    from proxybench.training.resume import training_preflight
+    from proxybench.training.trajectory import load_state, restore_loaded_state, publish_state, train_updates
+    accepted = training_preflight(dataset, run_dir, config, resume=resume)
+    rows, identity, order = accepted['rows'], accepted['identity'], accepted['order']
+    completed = accepted['completed']
+    saved = (load_state(accepted['checkpoint'], identity=identity, order=order, completed=completed)
+             if resume else None)
+    # CPU checkpoint checks finish before imports that initialize the GPU stack.
     from unsloth import FastLanguageModel
     import torch
     from transformers import set_seed
     from peft import get_peft_model_state_dict, set_peft_model_state_dict
     from unsloth_zoo.loss_utils import fused_linear_cross_entropy
-    from proxybench.training.dataset import read_release
     from proxybench.training.checkpoints import publish_adapter
-    from proxybench.training.trajectory import sample_order, publish_state, require_clean_stop, restore_state, train_updates
     from proxybench.training.merge import tensor_hash
-    if (config['batch_size'] != 1 or config['accumulation'] != 1 or config['max_grad_norm'] != 1.0):
-        raise ValueError('This worker requires batch size 1, accumulation 1, and gradient norm 1')
     output = Path(run_dir)
     output.mkdir(parents=True, exist_ok=True)
-    rows, manifest = read_release(dataset)
     import shutil
     if shutil.disk_usage(output).free < config['minimum_disk_bytes']:
         raise ValueError('Training disk reserve is insufficient')
-    if not rows['training']:
-        raise ValueError('Training split is empty')
     set_seed(config['seed'])
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
@@ -176,9 +177,6 @@ def train(dataset, run_dir, config, resume=False):
         raise ValueError('Loaded tokenizer changes prepared sequences')
     pristine = {n: tensor_hash(p) for n, p in model.named_parameters()}
     model = attach_adapter(model, config, output)
-    order = sample_order(len(rows['training']), config['epochs'], config['seed'])
-    identity = dict(dataset=binding(manifest), recipe=binding(config), order=binding(order))
-    durable_json(output/'training-inputs.json', dict(identity=identity, order=order))
     base = model.get_base_model()
     backbone, head = base.model, base.get_output_embeddings()
     collator = ResponseCollator(tokenizer.pad_token_id)
@@ -189,18 +187,13 @@ def train(dataset, run_dir, config, resume=False):
                                  lr=config['learning_rate'], weight_decay=config['weight_decay'])
     weights = lambda: get_peft_model_state_dict(model, save_embedding_layers=False)
     journal = output/'training-journal.json'
-    completed, history = 0, []
-    if journal.exists():
-        if not resume:
-            raise ValueError('Training exists. Use resume after a clean stop.')
-        previous = json.loads(journal.read_text())
-        checkpoint = Path(previous['checkpoint'])
-        completed = require_clean_stop(previous, checkpoint, identity)
-        saved = restore_state(model, optimizer, checkpoint, identity=identity, order=order, completed=completed,
-                              get_weights=weights, set_weights=lambda v: set_peft_model_state_dict(model, v))
+    history = []
+    if saved is not None:
+        restore_loaded_state(model, optimizer, saved, order=order, completed=completed,
+                             get_weights=weights, set_weights=lambda v: set_peft_model_state_dict(model, v))
         history = saved['history']
-    elif resume:
-        raise ValueError('No clean checkpoint exists to resume')
+    else:
+        durable_json(output/'training-inputs.json', accepted['inputs'])
     def memory():
         torch.cuda.synchronize()
         free, total = torch.cuda.mem_get_info()
@@ -395,23 +388,23 @@ def training_status(root, status):
 
 def resume_training(run_dir):
     from proxybench.runstate import Run
+    from proxybench.training.resume import training_preflight
     with Run(run_dir) as run:
         if run.state.get('operation') != 'train':
             raise ValueError('This is not a training run')
-        config = run.state['configuration']
-        from proxybench.training.dataset import read_release
-        _, manifest = read_release(run.state['dataset'])
-        if (run.state['identity']['dataset'] != binding(manifest)
-                or run.state['identity']['prompt'] != digest(config['system_prompt'])):
-            raise ValueError('Training inputs changed before resume')
+        config = run.state.get('configuration')
+        if not isinstance(run.state.get('dataset'), str) or not run.state['dataset']:
+            raise ValueError('Training run dataset path is missing or invalid')
+        training_preflight(run.state['dataset'], run_dir, config, resume=True, run_state=run.state)
         from proxybench.execution.resources import ledger_entries
         resource_floor(run)
         root_used = sum(row['elapsed_seconds'] for row in ledger_entries(Path(run_dir)/'resources.jsonl'))
         ceiling = root_used + run.state['resource_limit_seconds'] - run.state['consumed_seconds']
-        status = launch('train', run_dir, config, dataset=run.state['dataset'], resume=True, resource_ceiling=ceiling)
-        run.state['status'] = training_status(run_dir, status)
-        resource_floor(run)
-        run.save()
+        try:
+            status = launch('train', run_dir, config, dataset=run.state['dataset'], resume=True, resource_ceiling=ceiling)
+            run.state['status'] = training_status(run_dir, status)
+        finally:
+            resource_floor(run)
         return run.state
 
 
@@ -536,6 +529,8 @@ def cli(args):
             if operation == 'infer':
                 infer_run(run)
             elif operation == 'train':
+                from proxybench.training.resume import training_preflight
+                training_preflight(run.state['dataset'], args.run_dir, config, run_state=run.state)
                 status = launch(operation, args.run_dir, config, dataset=run.state['dataset'], resume=False)
                 run.state['status'] = training_status(args.run_dir, status)
             else:

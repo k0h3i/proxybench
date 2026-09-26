@@ -1,14 +1,16 @@
 """Save exact update trajectories and restore only their current safe boundary."""
 
 import os
+import math
 from pathlib import Path
 import random
 import time
 import uuid
 
 from proxybench.execution.resources import durable_json
-from proxybench.training.checkpoints import validate_checkpoint
-from proxybench.training.adapters import digest, read_json
+from proxybench.training.checkpoints import (plain_path, require_hash, require_position,
+                                           validate_checkpoint)
+from proxybench.training.adapters import digest
 
 
 def sample_order(count=96, epochs=2, seed=42):
@@ -117,18 +119,78 @@ def publish_state(model, optimizer, tokenizer, directory, *, identity, order, co
     return directory
 
 
-def restore_state(model, optimizer, directory, *, identity, order, completed,
-                  set_weights=None, get_weights=None):
+def validate_trajectory(state, order, completed):
+    """Inspect CPU state without changing models or the active random state."""
+    import numpy as np
     import torch
+    require_position(completed, len(order), 'Completed position')
+    if not isinstance(state, dict):
+        raise ValueError('Checkpoint state must be an object')
+    required = {'weights', 'optimizer', 'parameter_map', 'random', 'order', 'completed', 'next_position', 'history'}
+    if not required <= state.keys():
+        raise ValueError('Checkpoint state is missing required fields')
+    require_position(state['completed'], len(order), 'Checkpoint completed position')
+    require_position(state['next_position'], len(order), 'Checkpoint next position')
+    if (not isinstance(state['order'], list) or any(type(i) is not int for i in state['order'])
+            or state['order'] != order or state['completed'] != completed or state['next_position'] != completed):
+        raise ValueError('Checkpoint trajectory positions or sample order differ')
+    history = state['history']
+    if not isinstance(history, list) or len(history) != completed:
+        raise ValueError('Checkpoint history length differs from its completed position')
+    for position, row in enumerate(history):
+        if (not isinstance(row, dict) or type(row.get('step')) is not int or row['step'] != position + 1
+                or type(row.get('index')) is not int or row['index'] != order[position]
+                or type(row.get('response_tokens')) is not int or row['response_tokens'] <= 0
+                or any(type(row.get(key)) not in (int, float) or not math.isfinite(row[key])
+                       for key in ('loss', 'update_seconds')) or row['update_seconds'] < 0):
+            raise ValueError('Checkpoint history contains an invalid update')
+    mapping = state['parameter_map']
+    if (not isinstance(state['weights'], dict) or not state['weights']
+            or not isinstance(state['optimizer'], dict)
+            or not isinstance(state['optimizer'].get('state'), dict)
+            or not isinstance(state['optimizer'].get('param_groups'), list)
+            or not isinstance(mapping, list) or not mapping
+            or any(not isinstance(group, list) or not group or any(not isinstance(n, str) or not n for n in group)
+                   for group in mapping)):
+        raise ValueError('Checkpoint weights or optimizer structure is invalid')
+    rng = state['random']
+    if not isinstance(rng, dict) or not {'python', 'numpy', 'cpu', 'device'} <= rng.keys():
+        raise ValueError('Checkpoint random state is missing required fields')
+    try:
+        random.Random().setstate(rng['python'])
+        np.random.RandomState().set_state(rng['numpy'])
+        torch.Generator(device='cpu').set_state(rng['cpu'])
+        if (not isinstance(rng['device'], list)
+                or any(not isinstance(v, torch.Tensor) or v.device.type != 'cpu'
+                       or v.dtype != torch.uint8 or v.ndim != 1 or not v.numel() for v in rng['device'])):
+            raise ValueError('Invalid device random state')
+    except (TypeError, ValueError, RuntimeError, IndexError) as exc:
+        raise ValueError('Checkpoint random state is invalid') from exc
+    return state
+
+
+def load_state(directory, *, identity, order, completed):
+    """Hash and load a trusted local checkpoint on CPU before GPU setup."""
     manifest = validate_checkpoint(directory, identity)
+    require_position(manifest.get('completed'), len(order), 'Checkpoint completed position')
     if manifest['completed'] != completed:
         raise ValueError('Checkpoint is not the last completed update')
-    state = torch.load(Path(directory) / 'state.pt', map_location='cpu', weights_only=False)
-    if (state['order'] != order or state['completed'] != completed or state['next_position'] != completed
-            or state['parameter_map'] != parameter_map(model, optimizer)
-            or len(state['history']) != completed
-            or [row['index'] for row in state['history']] != order[:completed]):
-        raise ValueError('Checkpoint trajectory or parameter mapping differs')
+    if 'state.pt' not in manifest['files']:
+        raise ValueError('Checkpoint inventory has no training state')
+    import torch
+    import pickle
+    try:
+        # Hashes detect changed bytes. They do not make untrusted pickle safe.
+        state = torch.load(Path(directory) / 'state.pt', map_location='cpu', weights_only=False)
+    except (OSError, ValueError, TypeError, RuntimeError, EOFError, pickle.UnpicklingError) as exc:
+        raise ValueError('Trusted checkpoint state cannot be read') from exc
+    return validate_trajectory(state, order, completed)
+
+
+def restore_loaded_state(model, optimizer, state, *, order, completed, set_weights=None, get_weights=None):
+    validate_trajectory(state, order, completed)
+    if state['parameter_map'] != parameter_map(model, optimizer):
+        raise ValueError('Checkpoint parameter mapping differs')
     (set_weights or model.load_state_dict)(state['weights'])
     assert_same(state['weights'], (get_weights or model.state_dict)())
     optimizer.load_state_dict(state['optimizer'])
@@ -138,14 +200,39 @@ def restore_state(model, optimizer, directory, *, identity, order, completed,
     return state
 
 
-def require_clean_stop(journal, checkpoint, identity):
-    manifest = validate_checkpoint(checkpoint, identity)
-    if (journal.get('status') != 'CLEAN_STOP' or journal.get('pending_step') is not None
-            or journal.get('checkpoint') != str(Path(checkpoint).resolve())
-            or journal['completed'] != manifest['completed']
-            or journal.get('checkpoint_sha256') != digest(Path(checkpoint) / 'manifest.json')):
+def restore_state(model, optimizer, directory, *, identity, order, completed,
+                  set_weights=None, get_weights=None):
+    state = load_state(directory, identity=identity, order=order, completed=completed)
+    return restore_loaded_state(model, optimizer, state, order=order, completed=completed,
+                                set_weights=set_weights, get_weights=get_weights)
+
+
+def require_clean_stop(journal, checkpoint, identity, *, total=None, hash_files=True):
+    if not isinstance(journal, dict) or journal.get('status') != 'CLEAN_STOP':
+        raise ValueError('Resume requires a CLEAN_STOP journal. Use a new run folder for other states.')
+    if not {'checkpoint', 'completed', 'pending_step', 'checkpoint_sha256'} <= journal.keys():
+        raise ValueError('Clean-stop journal is missing required fields')
+    if journal['pending_step'] is not None:
+        raise ValueError('Clean-stop journal cannot contain a pending update')
+    position = journal['completed']
+    require_position(position, total if total is not None else max(position, 0) if type(position) is int else 0,
+                     'Journal completed position')
+    saved_path = journal['checkpoint']
+    if not isinstance(saved_path, str) or not Path(saved_path).is_absolute():
+        raise ValueError('Clean-stop checkpoint path must be absolute')
+    path = plain_path(saved_path)
+    if saved_path != str(path) or path != plain_path(checkpoint):
+        raise ValueError('Clean-stop checkpoint path differs')
+    require_hash(journal['checkpoint_sha256'], 'Clean-stop checkpoint hash')
+    manifest = validate_checkpoint(path, identity, hash_files=hash_files)
+    if 'state.pt' not in manifest['files']:
+        raise ValueError('Clean-stop checkpoint inventory has no training state')
+    require_position(manifest.get('completed'), total if total is not None else position,
+                     'Checkpoint completed position')
+    if (position != manifest['completed']
+            or journal['checkpoint_sha256'] != digest(path / 'manifest.json')):
         raise ValueError('Resume requires the exact checkpoint from a clean stop')
-    return journal['completed']
+    return position
 
 
 def train_updates(model, optimizer, order, loss_fn, journal_path, *, start=0, history=None,
