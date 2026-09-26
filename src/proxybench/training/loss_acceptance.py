@@ -69,6 +69,25 @@ def error_metrics(actual, expected):
                 relative_l2=float(difference.norm() / expected.norm().clamp_min(1e-30)))
 
 
+def compare_loss_case(actual, expected, actual_inputs, reference_inputs, labels, tolerance, *, gradients):
+    """Keep forward-only evidence distinct from supported backward comparisons."""
+    import torch
+    metrics = dict(loss=error_metrics(actual, expected))
+    passed = metrics['loss']['max_absolute'] <= tolerance['loss_absolute']
+    if not gradients:
+        return dict(passed=passed, gradient_status='UNSUPPORTED_DTYPE', **metrics)
+    actual_gradients = torch.autograd.grad(actual, actual_inputs)
+    reference_gradients = torch.autograd.grad(expected, reference_inputs)
+    for name, left, right in zip(('hidden_gradient', 'weight_gradient', 'adapter_a_gradient',
+                                 'adapter_b_gradient'), actual_gradients, reference_gradients, strict=True):
+        metrics[name] = error_metrics(left, right)
+        passed = passed and metrics[name]['relative_l2'] <= tolerance['gradient_relative_l2']
+    ignored = torch.ones_like(labels, dtype=torch.bool)
+    ignored[..., :-1] = labels[..., 1:] == -100
+    passed = passed and bool((actual_gradients[0][ignored] == 0).all())
+    return dict(passed=passed, gradient_status='COMPARED', **metrics)
+
+
 def run_cuda_loss(output):
     """Execute the installed helper, with no CPU substitute or manual shift."""
     import unsloth  # Import before Torch, as required by the installed stack.
@@ -83,7 +102,10 @@ def run_cuda_loss(output):
     from proxybench.training.runtime import phase, stopping
     phase('compilation')
     report = dict(status='RUNNING', helper=source, device=torch.cuda.get_device_name(),
-                  torch=torch.__version__, cases=[])
+                  torch=torch.__version__, cases=[],
+                  acceptance_scope='BF16 loss and gradients; FP32 forward loss only',
+                  unsupported=[dict(dtype='float32', operation='backward',
+                                    reason='Backwards requires embeddings to be bf16 or fp16')])
     # Fixed, predeclared budgets: kernel accumulation and BF16 rounding differ.
     # Filtering is tested separately, at the actual helper's default threshold.
     tolerances = {
@@ -112,27 +134,14 @@ def run_cuda_loss(output):
                 actual = fused_linear_cross_entropy(actual_hidden, actual_weight, labels,
                                                     accuracy_threshold=threshold)
                 expected = reference_loss(reference_hidden, reference_weight, labels)
-                actual_gradients = torch.autograd.grad(actual, (actual_hidden, actual_weight, adapter_a, adapter_b))
-                reference_gradients = torch.autograd.grad(expected, (reference_hidden, reference_weight,
-                                                                    reference_a, reference_b))
-                metrics = dict(loss=error_metrics(actual, expected),
-                               hidden_gradient=error_metrics(actual_gradients[0], reference_gradients[0]),
-                               weight_gradient=error_metrics(actual_gradients[1], reference_gradients[1]),
-                               adapter_a_gradient=error_metrics(actual_gradients[2], reference_gradients[2]),
-                               adapter_b_gradient=error_metrics(actual_gradients[3], reference_gradients[3]))
-                tolerance = tolerances[dtype_name]
-                passed = (metrics['loss']['max_absolute'] <= tolerance['loss_absolute']
-                          and all(metrics[key]['relative_l2'] <= tolerance['gradient_relative_l2']
-                                  for key in ('hidden_gradient', 'weight_gradient',
-                                              'adapter_a_gradient', 'adapter_b_gradient')))
-                # Prompt and padding predictors must remain exactly excluded.
-                ignored = torch.ones_like(labels, dtype=torch.bool)
-                ignored[..., :-1] = labels[..., 1:] == -100
-                passed = passed and bool((actual_gradients[0][ignored] == 0).all())
+                metrics = compare_loss_case(actual, expected,
+                    (actual_hidden, actual_weight, adapter_a, adapter_b),
+                    (reference_hidden, reference_weight, reference_a, reference_b), labels,
+                    tolerances[dtype_name], gradients=dtype == torch.bfloat16)
                 report['cases'].append(dict(name=name, dtype=dtype_name, filter=threshold,
                                            effective_filter_eps=(torch.finfo(dtype).eps / 32
                                                                  if threshold == 'auto' else None),
-                                           passed=passed, **metrics))
+                                           **metrics))
                 durable_json(output, report)
     report['status'] = 'PASSED' if all(row['passed'] for row in report['cases']) else 'FAILED'
     durable_json(output, report)

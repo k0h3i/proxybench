@@ -11,6 +11,7 @@ Require the pinned environment, declared inputs, and complete CPU suite to pass 
 The user starts every GPU command below.
 These commands do not start a full training campaign or change the retained model.
 The [training review](training-review.md) explains the evidence gaps.
+The [GPU acceptance results](training-gpu-acceptance.md) record the September 26 loss pass and exact-continuation failure.
 
 ## CPU evidence
 
@@ -50,11 +51,17 @@ Run from the repository root:
 
 The command calls the actual installed `fused_linear_cross_entropy` helper.
 It compares loss and gradients against the FP32 reference.
-The gradients cover hidden states, output weights, and both matrices of a synthetic rank-8 adapter.
+The BF16 gradients cover hidden states, output weights, and both matrices of a synthetic rank-8 adapter.
 An adapter is a small trainable addition to a frozen model.
 FP32 and BF16 are numerical storage formats with different precision.
 Each format uses both disabled filtering and the helper default, `auto`.
 The helper receives original labels without a manual shift.
+
+The installed kernel accepts BF16 or FP16 hidden states for backward calculation.
+It rejects FP32 hidden-state gradients with `Backwards requires embeddings to be bf16 or fp16`.
+FP32 cases compare forward loss only and record `gradient_status=UNSUPPORTED_DTYPE`.
+They do not establish FP32 gradient agreement.
+BF16 cases exercise the baseline training precision and require all gradient comparisons.
 
 The test uses five synthetic mask cases with 64 hidden dimensions and 2,048 output tokens.
 It uses seed 42 and disables TF32, a reduced-precision matrix multiplication mode.
@@ -66,7 +73,7 @@ The acceptance budgets are fixed before execution:
 
 | Format | Maximum absolute loss error | Maximum relative gradient norm error |
 |---|---:|---:|
-| FP32 | `2e-5` | `2e-4` |
+| FP32 | `2e-5` | Unsupported by the installed backward kernel |
 | BF16 | `5e-3` | `2e-2` |
 
 Relative gradient norm error divides the difference norm by the reference norm.

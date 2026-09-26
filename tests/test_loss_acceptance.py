@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from proxybench.training.loss_acceptance import (
-    installed_helper_source, launch_acceptance, loss_cases, reference_loss,
+    compare_loss_case, installed_helper_source, launch_acceptance, loss_cases, reference_loss,
 )
 from proxybench.training.adapters import ResponseCollator
 from proxybench.training.sequences import sequence
@@ -122,6 +122,19 @@ class LossAcceptanceTests(unittest.TestCase):
             reference_loss(hidden, weight, labels)
         with self.assertRaisesRegex(ValueError, 'shapes differ'):
             reference_loss(hidden, weight, labels[:, :-1])
+
+    def test_forward_only_case_never_claims_or_requests_unsupported_gradients(self):
+        torch = self.torch
+        tolerance = dict(loss_absolute=2e-5, gradient_relative_l2=2e-4)
+        with patch('torch.autograd.grad', side_effect=AssertionError('unsupported backward')):
+            report = compare_loss_case(torch.tensor(1.0), torch.tensor(1.0), (), (),
+                                       torch.tensor([[-100, 1]]), tolerance, gradients=False)
+        self.assertTrue(report['passed'])
+        self.assertEqual(report['gradient_status'], 'UNSUPPORTED_DTYPE')
+        self.assertNotIn('hidden_gradient', report)
+        report = compare_loss_case(torch.tensor(1.1), torch.tensor(1.0), (), (),
+                                   torch.tensor([[-100, 1]]), tolerance, gradients=False)
+        self.assertFalse(report['passed'])
 
     def test_installed_helper_applies_one_shift_without_gpu_import(self):
         identity = installed_helper_source()

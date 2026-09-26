@@ -47,8 +47,9 @@ No review finding remains open.
 ## Pending acceptance and decisions
 
 The [acceptance guide](training-acceptance.md) provides bounded user-launched loss, continuation, and timing commands.
-Actual fused CUDA loss and adapter-gradient agreement remain pending.
-Actual-stack exact continuation remains pending.
+The later [GPU acceptance](training-gpu-acceptance.md) passed BF16 loss and synthetic adapter-gradient comparisons within the declared tolerances.
+Its exact-continuation comparison failed, including differences before the checkpoint interruption.
+Actual-stack exact continuation remains unaccepted.
 No GPU speed improvement or extraction-quality improvement is established.
 
 The [Trainer guide](trainer-experiment.md) provides its separate bounded commands and source-identity restrictions.
