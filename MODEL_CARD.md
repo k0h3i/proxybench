@@ -1,37 +1,133 @@
 # ProxyType-4B
 
-ProxyType-4B is the working name for a model that extracts one marked voting target from historical SEC N-PX text and HTML.
+ProxyType-4B is intended for research on extracting proxy-voting records from historical SEC Form N-PX text and HTML.
+It takes one manually marked voting target with its source context and produces a structured answer.
 Name clearance and public release remain pending.
-The output combines source values with standardized labels under the [label contract](docs/label-contract.md).
 
-## Model and training
+## Model details
 
-The base model is `Qwen/Qwen3.5-4B` at revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`.
+The model belongs to the ProxyBench project.
+LoRA trains small weight changes while keeping the base model fixed.
+An adapter stores those learned changes separately.
+
+| Property | Value |
+|---|---|
+| Working model name | ProxyType-4B |
+| Base model | `Qwen/Qwen3.5-4B` |
+| Base revision | `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` |
+| Adaptation method | LoRA training on accepted extraction answers. |
+| Input | Selected source context with one marked voting target. |
+| Required output | One JSON object under the fourteen-field `fields` contract. |
+| Retained formats | Separate adapter and merged BF16 GGUF. |
+
+## Intended use
+
+The intended users are researchers studying document extraction and proxy voting.
+The supported workflow requires manual target selection, local model execution, and review against the supplied source.
+Research tasks include studying field extraction errors and comparing a selected model with development references.
+
+The [label contract](docs/label-contract.md) defines the required answer and the meaning of each field.
+It separates source facts, values derived through named rules, and unresolved information.
+It preserves fund groups, collective votes, string identifiers, and multiple disclosed vote directions.
+These are output requirements, not guarantees that every model answer follows them.
+
+## Training and evaluation data
+
+The private dataset contains 420 accepted examples from 36 source files.
+It retains the following split:
+
+| Split | Examples | Role |
+|---|---|---|
+| Training | 330 | Accepted answers used to train the adapter. |
+| Development | 90 | Exposed references used for evaluation. |
+
+The development examples contain known exposure and do not form an untouched test set.
+Source-group assignments and exposure restrictions remain in the private dataset manifest.
+The split does not establish performance on unseen filing layouts or reporting periods.
+
+Each example contains system, user, and assistant messages, as shown in the [README example](README.md#input-and-output-example).
+The [dataset guide](docs/dataset.md) covers source selection and explicit acceptance of training labels.
+The [data notice](DATA_NOTICE.md) describes the source collection and its separate distribution status.
+
+## Training procedure
+
 The retained final adapter completed 660 updates over 330 training examples, with two epochs.
-LoRA stores learned weight changes separately from the base model.
-The recipe uses rank 8, alpha 16, zero dropout, batch size 1, and learning rate 0.0001.
-See [configs/training.json](configs/training.json) for the full recipe.
+An epoch is one pass through the training examples.
+Training learns from the assistant response while excluding the instruction and source input from the training loss.
+Loss measures prediction error during training.
 
-Each example contains system, user, and assistant messages.
+| Hyperparameter | Value |
+|---|---|
+| Epochs | 2 |
+| Batch size | 1 |
+| Gradient accumulation steps | 1 |
+| Learning rate | 0.0001 |
+| LoRA rank / alpha / dropout | 8 / 16 / 0 |
+
+A token is a unit of text processed by the model.
+The recipe allows 5,120 tokens in total, with 3,328 for input and 1,792 for the response.
+Preparation rejects oversized examples without silently truncating their source context or answers.
+The [training configuration](configs/training.json) and [training guide](docs/training.md) provide the full recipe and procedures.
+
 The [exact system prompt](configs/model-system-prompt.txt) defines the model instruction.
-Its SHA-256 hash is `fb828305c494f90092180ae4e0dea4290b00f7f90fbb47ec34f8dff1810f3a93`.
-The dataset contains 330 training and 90 development examples from 36 source files.
-Known development exposure restrictions remain part of the private dataset manifest.
-The development split is not an untouched test set.
+A SHA-256 hash identifies its exact file bytes.
+Its hash is `fb828305c494f90092180ae4e0dea4290b00f7f90fbb47ec34f8dff1810f3a93`.
 
-## Formats and limits
+## Evaluation and uncertainty
 
-The adapter requires the pinned base model and its matching runtime.
-The final BF16 GGUF contains merged weights and tokenizer information for llama.cpp inference.
-The [inference guide](docs/inference.md) explains these formats and their loading paths.
-Portable loading tests remain pending until the user runs the bounded GPU commands.
+The evaluation workflow compares a selected model with the 90 development references.
+It measures answer format validity, exact agreement, and source-value correctness.
+It reports origin, derivation, and quotation errors separately.
+Source-value correctness can require review of the exact source, reference, and generated answer.
+
+Raw answers remain available before parsing or normalization.
+Timeouts, malformed answers, and extra records count as failures.
+Missing answers leave an evaluation incomplete, and invalid references prevent a valid accuracy report.
+A matching quotation alone does not prove that an answer interprets its source correctly.
 
 The project makes no independently benchmarked accuracy claim.
-The model can omit facts, associate the wrong source cells, or return malformed answers.
-A manually marked target does not establish automatic complete-filing recovery.
-The model does not provide investment advice.
-PDF processing, OCR, categorization, and proposal linking remain outside the supported scope.
+This card does not report an untouched-test result or establish suitability for production use.
+Repeated training or generation does not guarantee identical models, answers, or scores.
+Changing the model format or execution engine can also change answers.
+The [evaluation guide](docs/training.md#selected-model-evaluation) describes scoring and review requirements.
 
-The accepted dataset remains private.
-Code, source filings, and model weights have separate rights and release decisions.
-Finalize license terms, attribution, owner privacy review, and the exact upload list before publication under the [release guide](docs/release.md).
+## Limitations
+
+The model can omit facts, associate the wrong source cells, or return malformed or incomplete answers.
+An incomplete source selection can leave required context unavailable.
+Reviewers must distinguish missing information from explicit source statements, including an explicit absence of a management recommendation.
+Model outputs need review against the supplied source before use in research conclusions.
+
+Manual target selection does not establish automatic recovery of every record from a complete filing.
+PDF processing, optical character recognition (image-to-text conversion), categorization, and proposal linking remain outside the supported scope.
+The model does not provide investment advice.
+
+Filings and model answers remain untrusted data.
+Instructions inside a filing do not become instructions for the extraction system.
+The [security policy](SECURITY.md) covers source handling and sensitive reports.
+
+## Model formats and loading
+
+The adapter requires the pinned base model and its matching software environment.
+BF16 is a 16-bit numerical format for model weights.
+GGUF is the converted model format used by llama.cpp.
+The retained BF16 GGUF contains merged weights and tokenizer information.
+The supported input renderer also uses the retained tokenizer files.
+
+Complete the [preparation guide](docs/preparation.md) before the user starts GPU work.
+Portable adapter and GGUF loading tests remain pending until the user runs the bounded acceptance commands.
+Keep the last working model originals until both formats pass.
+The [inference guide](docs/inference.md) describes the loading paths and conversion requirements.
+
+## License, access, and references
+
+The repository code uses the [Apache License 2.0](LICENSE).
+Research use describes the model's intended purpose, not an additional restriction on that code license.
+The pinned Qwen base model also uses [Apache 2.0](https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/LICENSE).
+The accepted dataset and trained weights remain private.
+This card does not assign blanket license terms to source filings, labels, or model weights.
+
+The [release guide](docs/release.md) covers model license terms, attribution, privacy review, and approval of the exact upload list.
+The [README references](README.md#acknowledgments-and-references) credit the base model, training methods, and supporting software.
+For nonsensitive model questions, use a project issue.
+For sensitive reports, follow the [security policy](SECURITY.md#reporting-and-release-review).
