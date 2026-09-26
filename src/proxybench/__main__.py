@@ -47,7 +47,7 @@ def evaluation_export(run):
 
 def evaluation_command(args):
     from proxybench.evaluation.workflow import (create_run, prepare_inputs, load_inputs,
-                                               load_answers, generate, report, import_review, runtime_binding)
+                                               load_answers, report, import_review, runtime_binding)
     path = Path(args.run_dir)
     if path.exists() and (path / 'run.json').exists():
         state = json.loads((path / 'run.json').read_text())
@@ -103,10 +103,8 @@ def evaluation_command(args):
                 config = run.state['configuration']
                 if file_hash(config['model']) != inputs['identity']['model'] or runtime_binding(config) != inputs['identity']['runtime']:
                     raise ValueError('Model or runtime inputs changed; use a new run folder')
-                from proxybench.extraction.runtime import supervised_generate_answers
-                def one(messages, output, config):
-                    return supervised_generate_answers([messages], output, config)[0]
-                answers = generate(run, inputs, one)
+                from proxybench.evaluation.session import generate_session
+                answers = generate_session(run, inputs)
         return report(run, inputs, answers)
 
 

@@ -1,5 +1,6 @@
 """Run one pinned local GGUF model on marked source fragments."""
 import json
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import socket
@@ -81,14 +82,18 @@ def runtime_identity(config):
     return digest(manifest_path)
 
 
-def generate_answers(messages, output_dir, config):
-    """Worker API. Its caller must provide process and memory supervision."""
+@contextmanager
+def model_server(output_dir, config, *, startup_deadline=None, prepare=None):
+    """Keep one authenticated server alive under the caller's supervision."""
     from transformers import AutoTokenizer
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     identity = runtime_identity(config)
     tokenizer = AutoTokenizer.from_pretrained(config['tokenizer'], local_files_only=True, trust_remote_code=False)
-    prompts = [prompt_tokens(tokenizer, row, config) for row in messages]
+    if prepare is not None:
+        prepare(tokenizer)
+    if startup_deadline is not None and time.monotonic() >= startup_deadline:
+        raise TimeoutError('Model preparation exceeded its startup time limit')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
@@ -97,35 +102,30 @@ def generate_answers(messages, output_dir, config):
         raise ValueError('Server arguments cannot replace runtime bindings')
     command = [config['server'], '-m', config['model'], '--host', '127.0.0.1', '--port', str(port), *arguments]
     durable_json(output/'runtime.json', dict(runtime_manifest_sha256=identity, model_sha256=digest(config['model']), command=command))
+    if startup_deadline is not None and time.monotonic() >= startup_deadline:
+        raise TimeoutError('Model authentication exceeded its startup time limit')
     process = None
     try:
         with (output/'server.log').open('xb') as log:
             process = subprocess.Popen(command, stdout=log, stderr=log,
                                        env=dict(os.environ, LD_LIBRARY_PATH=config['library_path']))
             began = time.monotonic()
+            deadline = startup_deadline if startup_deadline is not None else began + config['startup_seconds']
             while True:
                 if process.poll() is not None:
                     raise RuntimeError('Model server stopped during startup')
-                if time.monotonic()-began > config['startup_seconds']:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     raise TimeoutError('Model server startup exceeded its time limit')
                 try:
-                    if json_request(port, '/health', timeout=1).get('status') == 'ok':
+                    if json_request(port, '/health', timeout=min(1, remaining)).get('status') == 'ok':
                         break
                 except (OSError, ValueError):
                     pass
                 time.sleep(.1)
-            answers = []
-            for index, (tokens, rendered) in enumerate(prompts):
-                require_prompt_tokens(port, rendered, tokens)
-                answer = generate(port, tokenizer, tokens, output/f'answer-{index}.json', index=index,
-                                  maximum=config['response_tokens'], deadline=config['natural_request_seconds'])
-                terminal = answer.get('terminal') or {}
-                if (answer['status'] == 'TERMINATION_MISMATCH' and terminal.get('stop_type') == 'limit'
-                        and terminal.get('tokens_predicted') == len(answer['token_ids']) == config['response_tokens']):
-                    answer['status'] = 'LENGTH_STOP'
-                    durable_json(output/f'answer-{index}.json', answer)
-                answers.append(answer)
-            return answers
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Model server startup exceeded its time limit')
+            yield port, tokenizer
     finally:
         if process is not None:
             process.terminate()
@@ -134,6 +134,33 @@ def generate_answers(messages, output_dir, config):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=2)
+
+
+def normalize_length_stop(answer, config):
+    """Recognize a verified response that used the entire output allowance."""
+    terminal = answer.get('terminal') or {}
+    if (answer['status'] == 'TERMINATION_MISMATCH' and terminal.get('stop_type') == 'limit'
+            and terminal.get('tokens_predicted') == len(answer['token_ids']) == config['response_tokens']):
+        answer['status'] = 'LENGTH_STOP'
+    return answer
+
+
+def generate_answers(messages, output_dir, config):
+    """Worker API. Its caller must provide process and memory supervision."""
+    output = Path(output_dir)
+    prompts = []
+    def prepare(tokenizer):
+        prompts.extend(prompt_tokens(tokenizer, row, config) for row in messages)
+    with model_server(output, config, prepare=prepare) as (port, tokenizer):
+        answers = []
+        for index, (tokens, rendered) in enumerate(prompts):
+            require_prompt_tokens(port, rendered, tokens)
+            answer = generate(port, tokenizer, tokens, output/f'answer-{index}.json', index=index,
+                              maximum=config['response_tokens'], deadline=config['natural_request_seconds'])
+            normalize_length_stop(answer, config)
+            durable_json(output/f'answer-{index}.json', answer)
+            answers.append(answer)
+        return answers
 
 
 def supervised_generate_answers(messages, output_dir, config):

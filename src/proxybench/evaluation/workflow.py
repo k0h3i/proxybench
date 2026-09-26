@@ -63,6 +63,28 @@ def answer_binding(inputs, case, answer):
     return binding(dict(identity=inputs['identity'], case=case, answer=answer))
 
 
+def recover_legacy_capture(run, inputs, case):
+    """Import a completed capture from the earlier per-example execution path."""
+    config = run.state['configuration']
+    limit = config.get('limits', {}).get('phase_seconds', config.get('request_seconds', 120))
+    output = run.path / 'evaluation' / 'capture' / binding(case['id'])
+    captures = [output] + sorted((p for p in output.glob('*') if p.is_dir() and p.name.isdigit()),
+                                 key=lambda p: int(p.name), reverse=True)
+    for capture in captures:
+        captured = capture / 'answers' / 'answer-0.json'
+        if not captured.exists():
+            continue
+        request = read_json((capture / 'request.json').read_text())
+        if request != dict(messages=[case['messages']], config=config):
+            raise ValueError('Interrupted capture has stale inputs')
+        raw = read_json(captured.read_text())
+        if isinstance(raw.get('status'), str) and raw['status'] and raw['status'] != 'STARTED' and isinstance(raw.get('text'), str):
+            saved = dict(binding=answer_binding(inputs, case, raw), answer=raw, elapsed_seconds=limit)
+            atomic_json(run.path / 'evaluation' / 'results' / (binding(case['id']) + '.json'), saved)
+            run.settle(case['id'], limit)
+            return
+
+
 def load_answers(run, inputs):
     from proxybench.execution.resources import reconcile_captures
     capture_seconds = reconcile_captures(run.path / 'evaluation' / 'capture')
@@ -70,9 +92,13 @@ def load_answers(run, inputs):
         pending = run.state.get('pending_charge')
         reserved = pending['seconds'] if pending else 0
         run.state['evaluation_resource_base_seconds'] = run.state['consumed_seconds'] - reserved
+    from proxybench.evaluation.session import recover_sessions
+    recover_sessions(run, inputs)
     answers = {}
     for case in inputs['cases']:
         path = run.path / 'evaluation' / 'results' / (binding(case['id']) + '.json')
+        if not path.exists():
+            recover_legacy_capture(run, inputs, case)
         if not path.exists():
             continue
         saved = read_json(path.read_text())
@@ -104,25 +130,6 @@ def generate(run, inputs, generator):
             continue
         limit = config.get('limits', {}).get('phase_seconds', config.get('request_seconds', 120))
         output = run.path / 'evaluation' / 'capture' / binding(case['id'])
-        captures = [output] + sorted((p for p in output.glob('*') if p.is_dir() and p.name.isdigit()),
-                                     key=lambda p: int(p.name), reverse=True)
-        recovered = False
-        for capture in captures:
-            captured = capture / 'answers' / 'answer-0.json'
-            if not captured.exists():
-                continue
-            request = read_json((capture / 'request.json').read_text())
-            if request != dict(messages=[case['messages']], config=config):
-                raise ValueError('Interrupted capture has stale inputs')
-            raw = read_json(captured.read_text())
-            if isinstance(raw.get('status'), str) and raw['status'] and raw['status'] != 'STARTED' and isinstance(raw.get('text'), str):
-                saved = dict(binding=answer_binding(inputs, case, raw), answer=raw, elapsed_seconds=limit)
-                atomic_json(run.path / 'evaluation' / 'results' / (binding(case['id']) + '.json'), saved)
-                run.settle(case['id'], limit)
-                recovered = True
-                break
-        if recovered:
-            continue
         if output.exists():
             # Keep interrupted capture and start a distinct attempt folder.
             attempt = 1

@@ -47,6 +47,9 @@ Evaluation scores one selected model against development references.
 It does not train a model.
 Use the trained run metadata or give an existing model and dataset explicitly.
 When a trained adapter needs conversion, evaluation uses the shared export path.
+Evaluation loads the merged GGUF once for the remaining examples in each attempt.
+Each example uses a separate request with prompt reuse disabled.
+The worker saves raw answers before it starts the next example.
 
 ```bash
 .venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/run-001 --config configs/inference.json
@@ -59,6 +62,19 @@ Timeouts and malformed answers stay in the scoring denominator.
 Missing answers make the evaluation incomplete.
 Invalid reference labels prevent a valid accuracy report.
 Field scoring keeps source-value errors separate from origin and quotation diagnostics.
+
+One session contains the worker and its model server.
+Session captures and resource records live under `evaluation/capture/session-*/`.
+The session uses the remaining run allowance and preserves startup, request, and memory limits.
+The per-example phase limit includes prompt preparation and token comparison.
+Loading and cleanup count once toward the cumulative allowance.
+
+If a request fails, evaluation saves that failure and stops the session.
+Unattempted examples remain incomplete.
+Use `resume` to process the remaining examples after the failure cause is resolved.
+A user stop leaves unfinished requests eligible for resume.
+Resume recovers completed captures before it requires model files.
+Actual GPU speed improvement and answer comparisons remain pending user-launched validation.
 
 When semantic scoring needs review, the command returns pending status and prints the review location.
 Review the exact source cells, reference labels, and new answer in the browser.
