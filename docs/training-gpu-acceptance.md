@@ -68,7 +68,7 @@ This result does not isolate a restoration defect.
 All 496 adapter tensors differ after four updates, with maximum absolute difference about `0.000736343`.
 The 992 optimizer moment tensors also differ.
 No tolerance change or deterministic-kernel change concealed these differences.
-Exact CUDA continuation remains unaccepted until a separate investigation resolves the divergence.
+These results do not support a claim of exact CUDA continuation.
 
 ## Optional acceleration warning
 
@@ -96,6 +96,38 @@ All four Qwen fast-path functions resolved, and `is_fast_path_available` returne
 The test took 9.18 seconds and allocated at most 8,573,440 bytes through Torch.
 These installation tests do not establish a training speed improvement or resolve the earlier continuation failure.
 
+## Tests after package installation
+
+The repeated loss comparison passed all 20 supported cases in 27.53 seconds.
+The repeated continuation test completed all three workers with clean stops and no remaining owned processes.
+Its combined resource charge was 284.21 seconds, within the 5,400-second limit.
+The exact comparison again recorded `FAILED` with `Saved tensor differs`.
+
+Initial weights, input identities, and runtime identities matched.
+Final random states, sample order, parameter mapping, and completed position also matched.
+All 496 adapter tensors differed, with maximum absolute difference about `0.000675242`.
+The first losses were `0.08876966685056686` and `0.08876976370811462`, before either run resumed.
+All three attempts recorded `deterministic_algorithms=False`.
+
+## Interpretation of repeatability
+
+Bitwise equality means that every stored bit matches.
+A fixed seed does not guarantee this equality for GPU operations.
+[PyTorch 2.12 documents](https://docs.pytorch.org/docs/2.12/notes/randomness.html) separate controls for random seeds and nondeterministic operations.
+It also describes the possible performance cost of deterministic algorithms.
+
+The [CCE source](https://github.com/apple-aiml-research/ml-cross-entropy/blob/main/cut_cross_entropy/cce_lse_forward.py) combines partial results from parallel GPU blocks without a fixed order.
+The installed `cut-cross-entropy==25.1.1` source also uses atomic additions and a lock around partial loss reductions.
+A lock prevents simultaneous writes but does not fix which block writes first.
+[NVIDIA explains](https://docs.nvidia.com/cuda/floating-point/index.html) how addition order changes floating-point rounding.
+This mechanism provides a plausible explanation for the differences, but these tests do not isolate their cause.
+
+The exact comparison tests a stronger claim than successful checkpoint restoration.
+Its failure alone does not establish a resume defect or make ordinary training invalid.
+Exact restoration of saved state remains required, even when later GPU calculations differ.
+Numerical continuation acceptance still needs a justified comparison against normal variation between fresh runs.
+The reports retain the failed exact comparison, and no acceptance limit changed.
+
 ## Retained evidence
 
 The external run folders retain reports, checkpoints, raw output, runtime identities, memory samples, and resource records.
@@ -105,6 +137,8 @@ Their identifiers are listed below:
 - `loss-acceptance-20260926T2005`: Corrected loss report with 20 passing cases.
 - `continuation-acceptance-20260926T2008`: Three clean worker exits and the failed exact comparison.
 - `causal-conv1d-installation-20260926T204756`: Installation test script, GPU report, build log, and final CPU results.
+- `loss-acceptance-causal-20260926T2054`: Repeated loss report with 20 passing cases after package installation.
+- `continuation-acceptance-causal-20260926T2055`: Repeated continuation evidence after package installation, including the failed exact comparison.
 
 The [acceptance guide](training-acceptance.md) describes the commands and their limits.
 The [implementation report](training-implementation.md) records the preceding CPU evidence.
