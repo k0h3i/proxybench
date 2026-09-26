@@ -35,7 +35,9 @@ class ResumeTests(unittest.TestCase):
         self.model = torch.nn.Linear(1, 1)
         self.optimizer = torch.optim.AdamW(self.model.parameters())
         self.checkpoint = publish_state(self.model, self.optimizer, None, self.output / 'checkpoints' / 'step-0',
-                                        identity=self.identity, order=self.order, completed=0, history=[])
+                                        identity=self.identity, order=self.order, completed=0, history=[],
+                                        diagnostics=dict(runtime_identity={'test': 'synthetic'},
+                                                         origin_runtime_identity={'test': 'synthetic'}))
         self.journal = dict(status='CLEAN_STOP', completed=0, pending_step=None,
                             checkpoint=str(self.checkpoint), checkpoint_sha256=digest(self.checkpoint / 'manifest.json'))
         self.inputs = dict(identity=self.identity, order=self.order)
