@@ -10,7 +10,8 @@ from proxybench.training.labels import sha
 
 
 def import_source(path, root, *, sec_url, accession, friendly_filename,
-                  retrieval_date=None, complete=False):
+                  retrieval_date=None, complete=False, storage='raw', filing_date=None,
+                  form=None, cik=None):
     """Require a reviewed completeness decision before admitting a local file."""
     validate_url(sec_url)
     if complete is not True:
@@ -33,18 +34,25 @@ def import_source(path, root, *, sec_url, accession, friendly_filename,
     if b'<sec-document>' in beginning and b'</sec-document>' not in raw[-65536:].lower():
         raise ValueError('SEC submission is truncated')
     root = Path(root).resolve()
-    folder = root/'data/raw'
+    if storage not in {'raw', 'test'}:
+        raise ValueError('Unknown source storage partition')
+    raw_folder = root/'data/raw'
+    folder = raw_folder/'test' if storage == 'test' else raw_folder
+    if not folder.resolve().is_relative_to(root):
+        raise ValueError('Source storage leaves the workspace')
     folder.mkdir(parents=True, exist_ok=True)
     manifest_path = root/'data/source-manifest.json'
     digest = sha(raw)
     location = dict(sec_url=sec_url,original_filename=source.name,accession=accession,
-                    retrieval_date=retrieval_date,filing_date=None,form=None,cik=None)
+                    retrieval_date=retrieval_date,filing_date=filing_date,form=form,cik=cik)
     with (root/'data/.source-import.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else dict(schema='source-inventory-v1',sources=[])
         entry = next((item for item in manifest['sources'] if item['sha256']==digest),None)
         if entry is None:
             destination = folder/friendly_filename
+            if not destination.resolve().is_relative_to(folder.resolve()):
+                raise ValueError('Source destination leaves its storage folder')
             if any(p.name.casefold()==friendly_filename.casefold() for p in folder.iterdir()):
                 raise FileExistsError('Source filename already exists')
             with destination.open('xb') as stream:
@@ -56,7 +64,11 @@ def import_source(path, root, *, sec_url, accession, friendly_filename,
             manifest['sources'].append(entry)
         else:
             retained=(root/entry['path']).resolve()
-            if not retained.is_relative_to(folder.resolve()) or sha(retained.read_bytes()) != digest:
+            if storage == 'test' and not retained.is_relative_to(folder.resolve()):
+                raise ValueError('Test source duplicates an existing non-test source')
+            if storage == 'raw' and retained.is_relative_to((raw_folder/'test').resolve()):
+                raise ValueError('Protected test source cannot enter ordinary source storage')
+            if not retained.is_relative_to(raw_folder.resolve()) or sha(retained.read_bytes()) != digest:
                 raise ValueError('Retained source identity changed')
             if location not in entry['locations']:
                 entry['locations'].append(location)

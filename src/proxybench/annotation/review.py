@@ -12,7 +12,7 @@ from proxybench.training.labels import FIELDS
 
 TEMPLATE = r'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ProxyBench · Training label review</title>
+<title>ProxyBench · Label review</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#edf1f3;color:#192b37;font:16px/1.5 system-ui,sans-serif}
 main{max-width:1200px;margin:24px auto;padding:0 22px}h1{font-size:28px;margin-bottom:8px}h2{font-size:22px}
@@ -29,7 +29,7 @@ nav button[aria-current=true]{background:#d7e8f0;border:2px solid #164c68}table.
 summary{cursor:pointer;color:#164c68}a{color:#164c68}#status{min-height:24px}#prior{max-width:110px}
 @media(max-width:750px){main{padding:0 10px}.card{padding:12px}.fields{display:block;overflow:auto}iframe{height:550px}}
 .training-group{border:1px solid #c9d3da;border-radius:5px;padding:8px;margin:8px 0}.training-group legend{font-weight:600}.training-value label{font-size:13px}.training-item{border-bottom:2px solid #c9d3da;padding-bottom:10px;margin-bottom:12px}table.fields{min-width:1100px}.fields td:nth-child(2){min-width:310px}</style></head><body><main>
-<h1>Training label review</h1>
+<h1>Label review</h1>
 <p>__COUNT__ source packets are ready. Read the yellow target and form your answer first. Then reveal the draft and revise it as needed.</p>
 <div class="card">
 <div class="bar"><button id="start" class="primary">Start review</button><button id="pause" disabled>Pause</button><button id="save">Download review draft</button><span id="timer" class="timer">00:00 / 30:00</span></div>
@@ -46,7 +46,7 @@ summary{cursor:pointer;color:#164c68}a{color:#164c68}#status{min-height:24px}#pr
 <p class="notice">Review the highlighted proposal and its disclosed vote. The reporting fund appears alongside it.</p>
 <iframe id="source" title="Readable original filing passage" sandbox=""></iframe>
 <p id="locations" class="small"></p>
-<details><summary>Label contract and editing guide</summary><p>Edit the answer text directly. Fund details, identifiers, and vote components have separate labeled controls. Select No value for missing information. An empty text box with No value cleared means empty text.</p><p>Origin is EXTRACTED or DERIVED for present fields. Leave it blank for unresolved fields. The contract defines the explicit nonvoting exception.</p><p>Supporting quotations are review notes. No source coordinates are required. Review completion does not itself accept a label for training.</p><details><summary>Full label contract</summary><pre style="white-space:pre-wrap">__CONTRACT__</pre></details></details>
+<details><summary>Label contract and editing guide</summary><p>Edit the answer text directly. Fund details, identifiers, and vote components have separate labeled controls. Select No value for missing information. An empty text box with No value cleared means empty text.</p><p>Origin is EXTRACTED or DERIVED for present fields. Leave it blank for unresolved fields. The contract defines the explicit nonvoting exception.</p><p>Supporting quotations are review notes. No source coordinates are required. Review completion does not itself accept a label for dataset export.</p><details><summary>Full label contract</summary><pre style="white-space:pre-wrap">__CONTRACT__</pre></details></details>
 </section>
 <section class="card"><h2>Compare and revise</h2>
 <div id="suggestion-controls" hidden>
@@ -254,8 +254,8 @@ def write_review(root, *, packet_directory, training_contract, draft_path=None):
     directory = root / packet_directory
     packets = json.loads((directory / 'packet-set.json').read_text(encoding='utf-8'))
     for packet in packets:
-        if packet['manifest'].get('split') not in {'training', 'development'}:
-            raise ValueError('Only training and development sources can enter review')
+        if packet['manifest'].get('split') not in {'training', 'development', 'test'}:
+            raise ValueError('Only training, development, and test sources can enter review')
         packet['review_binding'] = review_binding(packet)
     payload = json.dumps(packets, ensure_ascii=False).replace('<', '\\u003c')
     drafts = load_suggestions(draft_path, packets) if draft_path else {'packets': {}}

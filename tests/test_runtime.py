@@ -174,6 +174,36 @@ class LocalBaseSnapshotTests(unittest.TestCase):
                 base_snapshot(self.config)
             self.identity[key] = original
 
+    def test_comparison_gguf_coexists_with_pinned_checkpoint(self):
+        comparison = self.base / 'model-bf16.gguf'
+        comparison.write_bytes(b'GGUFsynthetic comparison model')
+        self.assertEqual(base_snapshot(self.config), str(self.base))
+        (self.base / 'model.safetensors').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'pinned hash'):
+            base_snapshot(self.config)
+
+    def test_comparison_gguf_requires_its_exact_name_and_header(self):
+        comparison = self.base / 'model-bf16.gguf'
+        for content in (b'', b'GGU', b'not a GGUF'):
+            comparison.write_bytes(content)
+            with self.subTest(content=content), self.assertRaisesRegex(ValueError, 'GGUF header'):
+                base_snapshot(self.config)
+        comparison.unlink()
+        for name in ('other.gguf', 'nested/model-bf16.gguf'):
+            extra = self.base / name
+            extra.parent.mkdir(parents=True, exist_ok=True)
+            extra.write_bytes(b'GGUFsynthetic comparison model')
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'unexpected file'):
+                base_snapshot(self.config)
+            extra.unlink()
+
+    def test_comparison_gguf_symlink_is_rejected(self):
+        outside = self.root / 'comparison.gguf'
+        outside.write_bytes(b'GGUFsynthetic comparison model')
+        (self.base / 'model-bf16.gguf').symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'symbolic links'):
+            base_snapshot(self.config)
+
     def test_missing_changed_and_unexpected_files_are_rejected(self):
         model = self.base / 'model.safetensors'
         original = model.read_bytes()

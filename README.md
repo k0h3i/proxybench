@@ -1,4 +1,4 @@
-# ProxyBench
+<h1 align="center">ProxyBench</h1>
 
 [![Code License: Apache 2.0](https://img.shields.io/badge/Code_License-Apache_2.0-green.svg)](LICENSE)
 [![Data: Private](https://img.shields.io/badge/Data-Private-red.svg)](DATA_NOTICE.md)
@@ -286,6 +286,7 @@ When meaning requires review, a reviewer compares the exact source cells, refere
 Review decisions apply to those specific inputs, and changed answers require new decisions.
 
 The [evaluation procedure](docs/training.md#selected-model-evaluation) covers generation, review, resume, and report creation.
+The [benchmark log](docs/benchmarking.md) records reviewed test results and conditions for future model comparisons.
 The [CPU tests](tests/README.md) exercise behavior with small synthetic sources and model substitutes.
 Those tests do not establish model accuracy or replace the pending GPU loading and answer comparisons.
 

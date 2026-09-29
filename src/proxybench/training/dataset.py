@@ -17,7 +17,7 @@ def check_assignments(selections, assignments):
     exposed = {a['group_id'] for a in assignments.values() if a['development_exposed']}
     for identity, assignment in assignments.items():
         split = assignment['split']
-        if split not in {'training', 'development', 'excluded'}:
+        if split not in {'training', 'development', 'test', 'excluded'}:
             raise ValueError('Unknown source assignment partition')
         if assignment['group_id'] in exposed and split == 'training':
             raise ValueError('Development-exposed source group cannot enter training')
@@ -38,6 +38,8 @@ def check_assignments(selections, assignments):
 
 def preserve_exposure(root, assignments):
     """Carry the existing exposure ledger into every future preparation."""
+    from proxybench.sources.holdout import reject_protected_sources
+    reject_protected_sources(root, [], assignments)
     path = Path(root)/'data/training-dataset/dataset-manifest.json'
     if not path.exists():
         check_assignments([], assignments)
@@ -66,19 +68,24 @@ def project_file(root, binding):
 
 def read_release(path, *, project_root=None):
     """Return exact rows and source-checked, hydrated example metadata."""
+    return _read_release(path, project_root=project_root)
+
+
+def _read_release(path, *, project_root=None, schema=SCHEMA, files=FILES):
+    """Share source reconstruction without admitting test data to training."""
     path = Path(path).resolve()
     root = Path(project_root or Path.cwd()).resolve()
     manifest = read_json((path / 'dataset-manifest.json').read_bytes())
-    if manifest.get('schema') != SCHEMA or manifest.get('status') != 'COMPLETE':
+    if manifest.get('schema') != schema or manifest.get('status') != 'COMPLETE':
         raise ValueError('Incomplete or unsupported dataset')
     if manifest.get('coordinate_convention') != COORDINATES or manifest.get('rendering_version') != VIEW_VERSION:
         raise ValueError('Unsupported source coordinates or rendering version')
     prompt = project_file(root, manifest['system_prompt']).decode('utf-8')
     project_file(root, manifest['label_contract'])
-    if set(manifest['files']) != set(FILES):
-        raise ValueError('Dataset must contain training and development files')
+    if set(manifest['files']) != set(files):
+        raise ValueError('Dataset files differ from its declared schema')
     rows, hydrated = {}, []
-    for split, name in FILES.items():
+    for split, name in files.items():
         file = manifest['files'][split]
         if file['path'] != name:
             raise ValueError('Unexpected dataset filename')
@@ -110,5 +117,8 @@ def read_release(path, *, project_root=None):
     if len(seen) != sum(map(len, rows.values())):
         raise ValueError('Missing dataset row metadata')
     check_assignments([e['selection'] for e in manifest['examples']], manifest['assignments'])
+    if schema == SCHEMA:
+        from proxybench.sources.holdout import reject_protected_sources
+        reject_protected_sources(root, [e['selection'] for e in manifest['examples']], manifest['assignments'])
     manifest['examples'] = hydrated
     return rows, manifest

@@ -9,6 +9,9 @@ These files record the reviewed results for that exact model.
 Keep the original BF16 Qwen3.5-4B checkpoint under `models/Qwen3.5-4B/`.
 Adapter loading and base-model comparisons share that copy.
 The loader compares its files with [base-model.json](../configs/base-model.json) before use.
+Keep the base comparison GGUF at `models/Qwen3.5-4B/model-bf16.gguf`.
+This converted file is separate from the pinned checkpoint inventory.
+Evaluation records its own file hash.
 Keep run history, environments, base caches, and merged conversion intermediates outside this folder.
 
 Use an external workspace for each future run.

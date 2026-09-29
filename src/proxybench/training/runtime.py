@@ -98,7 +98,10 @@ def base_snapshot(config):
                 f'.cache/huggingface/trees/{BASE_REVISION}.json'}
     metadata.update(f'.cache/huggingface/download/{name}{suffix}'
                     for name in expected for suffix in ('.metadata', '.lock'))
-    allowed = expected.keys() | metadata
+    # The comparison GGUF is separate from the authenticated HF checkpoint.
+    # Evaluation binds its bytes independently instead of loading it as HF weights.
+    comparison_gguf = 'model-bf16.gguf'
+    allowed = expected.keys() | metadata | {comparison_gguf}
     for path in root.rglob('*'):
         if path.is_symlink():
             raise ValueError('Base model snapshot cannot contain symbolic links')
@@ -106,6 +109,10 @@ def base_snapshot(config):
             continue
         if not path.is_file() or path.relative_to(root).as_posix() not in allowed:
             raise ValueError('Base model snapshot contains an unexpected file')
+        if path.relative_to(root).as_posix() == comparison_gguf:
+            with path.open('rb') as stream:
+                if stream.read(4) != b'GGUF':
+                    raise ValueError('Base comparison GGUF header differs')
     return str(root)
 
 

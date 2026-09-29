@@ -14,7 +14,11 @@ from proxybench.training.labels import dumps, from_review, read_json, sha
 def prepare_review(root, selections, output, *, prompt_path='configs/model-system-prompt.txt',
                    label_contract_path='docs/label-contract.md', assignments, draft_path=None):
     root, output = Path(root).resolve(), Path(output)
+    if any(s['split'] == 'test' for s in selections):
+        raise ValueError('Use prepare-test for protected test sources')
     assignments = preserve_exposure(root, assignments)
+    from proxybench.sources.holdout import reject_protected_sources
+    reject_protected_sources(root, selections, assignments)
     check_assignments(selections, assignments)
     packets = [prepare_historical(root, selection) for selection in selections]
     if len({p['manifest']['packet_id'] for p in packets}) != len(packets):
@@ -62,6 +66,8 @@ def accept_review(root, review_dir, review_path, approval_path, output, *, assig
         label = from_review(answer['fields'])
         literal_support(label, packet)
         split = selection['split']
+        if split not in FILES:
+            raise ValueError('Use accept-test for test references')
         row = {'messages': [dict(role='system', content=prompt_raw.decode('utf-8')),
                             dict(role='user', content=packet['model_input']),
                             dict(role='assistant', content=dumps(label))]}
@@ -70,6 +76,8 @@ def accept_review(root, review_dir, review_path, approval_path, output, *, assig
         rows[split].append(row)
         selections.append(selection)
     assignments = preserve_exposure(root, assignments)
+    from proxybench.sources.holdout import reject_protected_sources
+    reject_protected_sources(root, selections, assignments)
     check_assignments(selections, assignments)
     if output.exists():
         raise FileExistsError(output)

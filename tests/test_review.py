@@ -100,7 +100,7 @@ class ReviewTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_suggestions(path, packets)
 
-    def test_existing_page_is_preserved_and_test_packets_are_refused(self):
+    def test_existing_page_is_preserved_and_unknown_packets_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             packets, path = self.fixture(root)
@@ -109,7 +109,7 @@ class ReviewTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 write_review(root, packet_directory="review", training_contract="Contract", draft_path=path)
             self.assertEqual(output.read_bytes(), original)
-            packets[0]['manifest']['split'] = 'test'
+            packets[0]['manifest']['split'] = 'unknown'
             (root / 'review/packet-set.json').write_text(json.dumps(packets))
-            with self.assertRaisesRegex(ValueError, 'training and development'):
+            with self.assertRaisesRegex(ValueError, 'training, development, and test'):
                 write_review(root, packet_directory="review", training_contract="Contract")

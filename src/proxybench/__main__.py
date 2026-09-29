@@ -156,12 +156,17 @@ def main(argv=None):
     source.add_argument('--accession', required=True)
     source.add_argument('--filename', required=True)
     source.add_argument('--retrieval-date')
+    source.add_argument('--storage', choices=['raw', 'test'], default='raw')
+    source.add_argument('--filing-date')
+    source.add_argument('--form')
+    source.add_argument('--cik')
     source.add_argument('--complete', action='store_true', help='Attest that the source is complete')
     def import_command(args):
         from proxybench.sources.inventory import import_source
         return import_source(args.input, args.project_root, sec_url=args.url,
                              accession=args.accession, friendly_filename=args.filename,
-                             retrieval_date=args.retrieval_date, complete=args.complete)
+                             retrieval_date=args.retrieval_date, complete=args.complete,
+                             storage=args.storage, filing_date=args.filing_date, form=args.form, cik=args.cik)
     source.set_defaults(handler=import_command)
     fetch = commands.add_parser('fetch-source', help='Download a bounded SEC source for inspection')
     fetch.add_argument('--url', required=True)
@@ -221,6 +226,26 @@ def main(argv=None):
                              assignments=json.loads(Path(args.assignments).read_text()),
                              prompt_path=args.prompt, label_contract_path=args.label_contract)
     accept.set_defaults(handler=accept_command)
+    test_prepare = commands.add_parser('prepare-test', help='Prepare protected test sources for review')
+    test_prepare.add_argument('--project-root', default='.')
+    test_prepare.add_argument('--selections', required=True)
+    test_prepare.add_argument('--protocol', required=True)
+    test_prepare.add_argument('--audit', required=True)
+    test_prepare.add_argument('--output', required=True)
+    test_prepare.add_argument('--draft')
+    def test_prepare_command(args):
+        from proxybench.annotation.testing import prepare_test_review
+        return prepare_test_review(args.project_root, json.loads(Path(args.selections).read_text()), args.output,
+                                   protocol_path=args.protocol, audit_path=args.audit, draft_path=args.draft)
+    test_prepare.set_defaults(handler=test_prepare_command)
+    test_accept = commands.add_parser('accept-test', help='Export exact user-accepted test references')
+    test_accept.add_argument('--project-root', default='.')
+    for name in ('review-dir', 'review', 'approval', 'output'):
+        test_accept.add_argument('--' + name, required=True)
+    def test_accept_command(args):
+        from proxybench.annotation.testing import accept_test_review
+        return accept_test_review(args.project_root, args.review_dir, args.review, args.approval, args.output)
+    test_accept.set_defaults(handler=test_accept_command)
     args = parser.parse_args(argv)
     try:
         with redirect_stdout(sys.stderr if getattr(args, 'json', False) else sys.stdout):

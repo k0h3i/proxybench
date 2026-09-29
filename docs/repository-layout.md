@@ -21,7 +21,11 @@ Follow the [preparation guide](preparation.md) for their installation.
 
 Keep portable recipes and the exact model prompt under `configs/`.
 Keep shared guides under `docs/` and small synthetic behavior tests under `tests/`.
-Keep source files in flat `data/raw/` and accepted messages in `data/training-dataset/`.
+Keep ordinary source files in flat `data/raw/` and accepted training messages in `data/training-dataset/`.
+Keep test sources in `data/raw/test/` and accepted test messages in `data/testing-dataset/`.
+The test dataset folder contains only `test-examples.jsonl` and `dataset-manifest.json` after acceptance.
+Its manifest retains the accepted review and audit evidence.
+Keep protected test identities in `data/test-source-ledger.json`.
 Their manifests preserve source identity, labels, and split restrictions.
 
 Keep selected models under `artifacts/models/ProxyType-4B/`.
@@ -29,6 +33,8 @@ The folder contains `adapter/`, `model-bf16.gguf`, and `model-info.json`.
 A selected model can also retain its reviewed report and audit under `evaluation/`.
 Keep the pinned BF16 base under `artifacts/models/Qwen3.5-4B/`.
 Adapter loading and base-model comparisons share that copy.
+The base comparison GGUF stays in this folder as `model-bf16.gguf`.
+Evaluation records its hash separately from the original checkpoint files.
 [base-model.json](../configs/base-model.json) records its exact revision and file hashes.
 Data and model contents stay ignored, with their usage guides as tracked exceptions.
 Private Git history stays unchanged during cleanup.

@@ -8,7 +8,7 @@ import re
 from proxybench.annotation.bindings import canonical_bytes, sha256
 
 VIEW_VERSION = 'historical-cells-v1'
-PARTITIONS = {'training', 'development'}
+PARTITIONS = {'training', 'development', 'test'}
 
 
 class _Text(HTMLParser):
@@ -88,6 +88,50 @@ def source_block(raw, start, end, kind, encoding):
                 line_end=raw[:end - 1].count(b'\n') + 1)
 
 
+def context_blocks(root, selection):
+    """Preserve bounded context from other documents in the same filing."""
+    blocks, lines, views = [], [], []
+    for document_index, context in enumerate(selection.get('context_sources', []), 1):
+        if context.get('accession') != selection['accession'] or not context.get('association_review'):
+            raise ValueError('Context document needs the same accession and reviewed association')
+        path = Path(context['source_path'])
+        if path.is_absolute() or '..' in path.parts or not (root / path).resolve().is_relative_to(root):
+            raise ValueError('Context source path leaves the workspace')
+        source = root / path
+        if source.stat().st_size > 100 * 1024 ** 2:
+            raise ValueError('Context source exceeds the 100 MiB input limit')
+        raw = source.read_bytes()
+        if sha256(raw) != context['source_sha256']:
+            raise ValueError('Context source hash changed')
+        spans = context['spans']
+        if (not spans or any(not 0 <= a < b <= len(raw) for a, b, _ in spans)
+                or any(left[1] > right[0] for left, right in zip(spans, spans[1:]))):
+            raise ValueError('Context ranges are empty, overlapping, or out of order')
+        previous = 0
+        for index, (a, b, kind) in enumerate(spans, 1):
+            block = source_block(raw, a, b, kind, context.get('encoding', 'utf-8'))
+            block.update(block_id=f'D{document_index}:B{index}', target=False, source_path=path.as_posix())
+            blocks.append(block)
+            if a > previous:
+                gap = f'[OMITTED D{document_index} SOURCE BYTES {previous}:{a}]'
+                lines.append(gap)
+                views.append('<p>' + html.escape(gap) + '</p>')
+            import json
+            title = f"{block['block_id']} source bytes {a}:{b}"
+            rendered = [json.dumps(c['text'], ensure_ascii=False) + ''.join(
+                f' {key}={c[key]}' for key in ('colspan', 'rowspan') if key in c) for c in block['cells']]
+            lines.append(title + '\n' + ' | '.join(rendered))
+            body = ''.join('<td' + ''.join(f' {key}="{int(c[key])}"' for key in ('colspan', 'rowspan') if key in c)
+                           + '>' + html.escape(c['text']) + '</td>' for c in block['cells'])
+            views.append('<section><p>' + html.escape(title) + '</p><table><tr>' + body + '</tr></table></section>')
+            previous = b
+        if previous < len(raw):
+            gap = f'[OMITTED D{document_index} SOURCE BYTES {previous}:{len(raw)}]'
+            lines.append(gap)
+            views.append('<p>' + html.escape(gap) + '</p>')
+    return blocks, lines, views
+
+
 def prepare_historical(root, selection):
     """Build a packet from source-reviewed blocks and one target range.
 
@@ -107,7 +151,7 @@ def prepare_historical(root, selection):
     if sha256(raw) != selection['source_sha256']:
         raise ValueError('Source hash changed')
     if selection['split'] not in PARTITIONS:
-        raise ValueError('Historical preparation excludes test sources')
+        raise ValueError('Unknown historical source partition')
     if not selection.get('boundary_review') or not selection.get('reviewer'):
         raise ValueError('A reviewed logical target boundary is required')
     ranges = selection['spans']
@@ -122,11 +166,14 @@ def prepare_historical(root, selection):
     if (not marked or ranges[marked[0]][0] != target[0] or ranges[marked[-1]][1] != target[1]
             or any(ranges[i][1] != ranges[i + 1][0] for i in marked[:-1])):
         raise ValueError('Target must cover complete adjacent blocks. Defer shared-row subtargets.')
-    blocks, lines, views = [], [], []
+    blocks, lines, views = context_blocks(root, selection)
+    document_prefix = f'D{len(selection["context_sources"]) + 1}:' if selection.get('context_sources') else ''
     previous = 0
     for index, (a, b, kind) in enumerate(ranges):
         block = source_block(raw, a, b, kind, selection.get('encoding', 'utf-8'))
-        block.update(block_id=f'B{index + 1}', target=index in marked)
+        block.update(block_id=f'{document_prefix}B{index + 1}', target=index in marked)
+        if document_prefix:
+            block['source_path'] = source_path.as_posix()
         blocks.append(block)
         if a > previous:
             gap = f'[OMITTED SOURCE BYTES {previous}:{a}]'

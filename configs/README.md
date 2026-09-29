@@ -4,6 +4,8 @@
 `base-model.json` records the pinned base revision and SHA-256 hashes for its files.
 `inference.json` records the supported llama.cpp version and generation controls.
 `model-system-prompt.txt` contains the exact canonical prompt bytes.
+`testing.json` defines twelve test records, with one distinct SEC filing year from 2013 through 2024.
+It requires standardized 2024 disclosures and records coverage aims and source-replacement restrictions.
 
 `requirements-training.txt` pins Python model packages for `.venv/`.
 `requirements-training-build.txt` selects the packages needed before the convolution source build.

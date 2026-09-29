@@ -1,0 +1,13 @@
+{
+  "schema": "test-protocol-v1",
+  "examples": 12,
+  "filing_years": [2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024],
+  "standardized_years": [2024],
+  "scorer_version": "source-cells-v1",
+  "family_audit_required": true,
+  "selection_basis": "Source evidence before model predictions",
+  "format_scope": ["text", "html"],
+  "coverage_aims": ["Plain text and HTML", "Different registrants and issuers", "Individual funds and fund groups", "Collective subjects", "Multiple vote directions", "Disclosed quantities", "Missing recommendations and unresolved values"],
+  "replacement_rule": "Replace only for recorded source eligibility, representation, or length reasons before evaluation",
+  "interpretation": "Small purposive test set independent of audited project exposure; base-model pretraining exposure is unknown"
+}

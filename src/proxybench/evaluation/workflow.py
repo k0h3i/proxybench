@@ -24,22 +24,39 @@ def runtime_binding(config):
 
 def prepare_inputs(dataset, model, config, *, project_root=None):
     from proxybench.training.dataset import read_release
-    rows, manifest = read_release(dataset, project_root=project_root)
+    from proxybench.annotation.testing import SCHEMA as TEST_SCHEMA, read_test_release
+    schema = read_json((Path(dataset) / 'dataset-manifest.json').read_bytes()).get('schema')
+    split = 'test' if schema == TEST_SCHEMA else 'development'
+    reader = read_test_release if split == 'test' else read_release
+    rows, manifest = reader(dataset, project_root=project_root)
     cases = []
-    metadata = [item for item in manifest['examples'] if item['split'] == 'development']
-    for index, row in enumerate(rows['development']):
+    metadata = [item for item in manifest['examples'] if item['split'] == split]
+    for index, row in enumerate(rows[split]):
         item = next(entry for entry in metadata if entry['position'] == index)
         cells = [dict(block_index=b, cell_index=c, text=cell['text'])
                  for b, block in enumerate(item['packet']['manifest']['blocks'])
                  for c, cell in enumerate(block['cells'])]
         cases.append(dict(id=str(index), reference=read_json(row['messages'][-1]['content']),
                           source_cells=cells, messages=row['messages'][:-1]))
-    identity = dict(dataset=binding(manifest), model=file_hash(model), runtime=runtime_binding(config),
+    identity = dict(dataset=binding(manifest), split=split, model=file_hash(model), runtime=runtime_binding(config),
                     prompt=binding([case['messages'][0] for case in cases]))
-    return dict(schema=REPORT_SCHEMA, identity=identity, cases=cases)
+    if split == 'test':
+        from proxybench.training.dataset import project_file
+        from proxybench.annotation.testing import acceptance_content
+        preparation = read_json(acceptance_content(manifest['acceptance']['preparation']))
+        protocol = read_json(project_file(Path(project_root or Path.cwd()).resolve(), preparation['protocol']))
+        identity['scorer_version'] = protocol['scorer_version']
+        check_test_scorer(dict(dataset_split=split, identity=identity))
+    return dict(schema=REPORT_SCHEMA, identity=identity, dataset_split=split, cases=cases)
+
+
+def check_test_scorer(inputs):
+    if inputs.get('dataset_split') == 'test' and inputs['identity'].get('scorer_version') != SCORER_VERSION:
+        raise ValueError('Frozen test scorer differs from the current scorer version')
 
 
 def create_run(path, inputs, config):
+    check_test_scorer(inputs)
     ids = [case['id'] for case in inputs['cases']]
     if not ids or len(set(ids)) != len(ids):
         raise ValueError('Evaluation requires unique nonempty targets')
@@ -55,6 +72,7 @@ def load_inputs(run):
     inputs = read_json((run.path / 'evaluation' / 'inputs.json').read_text())
     if binding(inputs) != run.state['inputs_sha256'] or inputs['identity'] != run.state['identity']:
         raise ValueError('Saved evaluation inputs changed')
+    check_test_scorer(inputs)
     return inputs
 
 
@@ -184,6 +202,7 @@ def write_review(run, inputs, pending, answers):
 
 
 def report(run, inputs, answers):
+    check_test_scorer(inputs)
     destination = run.path / 'evaluation' / 'review' / 'decisions.json'
     decisions = read_json(destination.read_text()) if destination.exists() else {}
     invalid, missing, pending, scores = [], [], [], []
@@ -210,7 +229,10 @@ def report(run, inputs, answers):
     result = dict(schema=REPORT_SCHEMA, scorer=SCORER_VERSION, identity=inputs['identity'], status=status,
                   valid_accuracy=status == 'COMPLETE', targets=len(inputs['cases']), invalid_references=invalid,
                   missing_answers=missing, pending_review=[case['id'] for case in pending], cases=scores,
-                  aggregate=None, interpretation='Development data; not an untouched test set')
+                  aggregate=None, dataset_split=inputs.get('dataset_split', 'development'),
+                  interpretation=('Frozen test data; independence is limited to audited project exposure'
+                                  if inputs.get('dataset_split') == 'test'
+                                  else 'Development data; not an untouched test set'))
     if status == 'COMPLETE':
         result['aggregate'] = {key: sum(bool(row[key]) for row in scores)
                                for key in ('format_valid', 'exact', 'source_value_correct')}

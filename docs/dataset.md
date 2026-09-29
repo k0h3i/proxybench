@@ -8,7 +8,8 @@ Future preparation rejects training assignments that conflict with these restric
 
 ## Acquisition and source storage
 
-Keep complete original files in the flat `data/raw/` directory.
+Keep complete ordinary files in the flat `data/raw/` directory.
+Keep complete test files separately in `data/raw/test/`.
 The source manifest records original locations, friendly filenames, accession identities, encodings, and hashes where known.
 Keep amendments and attachments separate.
 Deduplicate identical bytes only when every original source location remains recorded.
@@ -78,3 +79,55 @@ It also checks source hashes, prompt bytes, row hashes, order, duplicate targets
 Assistant labels remain unchanged during path migration.
 The source and label files remain private unless the user separately authorizes their exact release list.
 See the [release guide](release.md) for raw-source review.
+
+## Test-only preparation
+
+The [test configuration](../configs/testing.json) defines twelve records from twelve distinct filings and SEC filing years, 2013 through 2024.
+The 2024 record requires standardized disclosures in text or HTML, including an official SEC HTML view.
+Record the reporting period separately from the filing year.
+Apply the existing fourteen-field contract without adding standardized-only output fields.
+The test configuration fixes the scoring version before any predictions.
+
+Keep accepted test messages and their manifest under `data/testing-dataset/`.
+Use temporary files for selections, review records, and source audits before acceptance.
+The accepted manifest retains the required review and audit evidence.
+Retain the prior dataset and source inventory before acquiring test sources.
+Record candidate exclusions, amendment relationships, source comparisons, and coverage gaps in the private selection audit.
+Do not weaken year or source-independence requirements to fill a coverage gap.
+Keep a hash-bound provider-family audit that covers prior sources, exposed accessions, and each test candidate.
+Use `family_id` for a reviewed provider identity shared by related funds.
+Do not treat a new registrant identifier as proof of an unexposed provider.
+
+Use `python -m proxybench prepare-test --help` for protected test preparation.
+Supply selections, the test configuration, and the source audit.
+For context from another document, supply `context_sources` with the same accession and an explicit association review.
+Retain each document's original bytes, hash, URL, encoding, and source ranges.
+
+Preparation reserves filing, source-group, registrant, and file identities in `data/test-source-ledger.json` before review.
+It also protects other admitted attachments from the same filing.
+Keep this ledger even when labels remain drafts.
+Ordinary preparation and the training reader reject protected sources, including attached context and matching file bytes.
+The ledger also retains reviewed `family_id` values without changing older group reservations.
+
+Review source context before revealing draft labels.
+Require independent agent review of drafts and scripts before handoff.
+Explicit user acceptance must bind the exact review hash, preparation hash, and ordered packet IDs.
+Use `python -m proxybench accept-test --help` only after that acceptance.
+
+The accepted test dataset uses schema `test-dataset-v1`.
+Its folder contains only `test-examples.jsonl` and `dataset-manifest.json`.
+The manifest retains the exact review, approval, and preparation text with their hashes.
+It also retains the accepted audit documents, source identity records, and protection metadata.
+Preparation paths in these records identify frozen evidence, not files that evaluation must read.
+Eligibility checks use live source and exposure records before acceptance.
+Finalized loading uses the accepted evidence and rebuilds inputs directly from the original test files.
+It needs no preparation folder, parent training dataset, prior raw filings, or live source inventory.
+Raw test sources, canonical policies, and the protection ledger remain required.
+Each example keeps the same `system`, `user`, and `assistant` message order as training examples.
+The test reader rebuilds sources and checks the exact acceptance record before evaluation.
+Evaluation refuses a scoring version that differs from the accepted test configuration.
+
+Evaluation selects the test split from this schema and sends only `system` and `user` messages to the model.
+Do not use test results to select prompts, models, thresholds, or replacement records.
+Identify later development-driven evaluations as regression testing, which checks behavior after changes, rather than an untouched test.
+This small, deliberately varied batch does not establish population accuracy or exclusion from base-model pretraining.
