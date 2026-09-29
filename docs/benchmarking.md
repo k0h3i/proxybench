@@ -28,8 +28,12 @@ Separate diagnostics cover origins, derivations, and quotations.
 The field score counts fourteen top-level comparisons per record, not every nested value independently.
 A field can pass its primary comparison while its quotation or derivation diagnostic fails.
 
-Exact matching requires equality of the complete parsed label, including list order, origins, and quotations.
-JSON object key order does not affect exact matching.
+`Exact records` counts answers that match the whole accepted reference answer after the evaluator reads the JSON.
+All fourteen fields and their nested fields must match.
+This includes values, availability states, origin tags, quotations, and list order.
+Capitalization and spaces inside text values must also match.
+JSON formatting and object key order do not affect the result.
+An answer can contain correct facts but fail exact matching because a quotation or origin tag differs.
 
 Semantic review means that a reviewer compares meaning with the supplied source.
 Review can accept equivalent wording for `separate_subject` under the frozen rules.
