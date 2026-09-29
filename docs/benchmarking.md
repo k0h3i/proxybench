@@ -46,39 +46,42 @@ Eleven valid answers required bound review decisions, which apply only to those 
 The malformed answer failed automatically.
 The imported decisions changed the report from `PENDING_REVIEW` to `COMPLETE`.
 
-| Date | Run | Model | Format | Schema-valid records | Source-value correct records | Correct primary fields | Exact records | Report status |
+| Date | Run | Model | Format / backend | Schema-valid records | Source-value correct records | Correct primary fields | Exact records | Report status |
 |---|---|---|---|---|---|---|---|---|
 | 2026-09-29 | `test-eval-001` | ProxyType-4B | BF16/F32 GGUF | 11/12 (91.7%) | 8/12 (66.7%) | 151/168 (89.9%) | 2/12 (16.7%) | `COMPLETE` |
 | 2026-09-29 | `qwen-base-test-eval-001` | Qwen3.5-4B base | BF16/F32 GGUF | 0/12 (0%) | 0/12 (0%) | 0/168 (0%) | 0/12 (0%) | `COMPLETE` |
+| 2026-09-29 | `luna-low-test-eval-001` | GPT-6 Luna (requested) | Managed agent, low effort requested | 5/12 (41.7%) | 0/12 (0%) | 60/168 (35.7%) | 0/12 (0%) | `COMPLETE` |
 
-Both reports contain zero missing answers, zero pending reviews, and zero invalid references.
-All twelve answers in each run ended normally without truncation or a generation timeout.
-Both reports declare `valid_accuracy: true`, which means that the workflow permits reporting these scores.
+All three reports contain zero missing answers, zero pending reviews, and zero invalid references.
+All twelve answers in each local GGUF run ended normally without truncation or a generation timeout.
+Luna returned twelve final messages, but its service stop reasons are unknown.
+All three reports declare `valid_accuracy: true`, which means that the workflow permits reporting these scores.
 It does not establish population accuracy or independence from model pretraining.
+Luna used different instruction delivery and runtime controls, as described in its section below.
 
 ### Field results
 
 Each row counts correct primary comparisons out of twelve.
 Each malformed answer contributes one failure to every row.
-ProxyType-4B produced one malformed answer, and the base model produced twelve.
+ProxyType-4B produced one malformed answer, the base model produced twelve, and Luna produced seven.
 The exclusions for derived values above still apply.
 
-| Field | ProxyType-4B | Qwen3.5-4B base |
-|---|---|---|
-| `reporting_scope` | 10/12 | 0/12 |
-| `series_identifiers` | 11/12 | 0/12 |
-| `issuer_name` | 11/12 | 0/12 |
-| `security_identifiers` | 9/12 | 0/12 |
-| `ticker` | 11/12 | 0/12 |
-| `meeting_date` | 11/12 | 0/12 |
-| `meeting_type` | 11/12 | 0/12 |
-| `proposal_number` | 11/12 | 0/12 |
-| `raw_description` | 11/12 | 0/12 |
-| `separate_subject` | 11/12 | 0/12 |
-| `proposal_source` | 11/12 | 0/12 |
-| `participation` | 11/12 | 0/12 |
-| `vote_components` | 11/12 | 0/12 |
-| `management_recommendation` | 11/12 | 0/12 |
+| Field | ProxyType-4B | Qwen3.5-4B base | GPT-6 Luna, agent-mediated |
+|---|---|---|---|
+| `reporting_scope` | 10/12 | 0/12 | 4/12 |
+| `series_identifiers` | 11/12 | 0/12 | 5/12 |
+| `issuer_name` | 11/12 | 0/12 | 5/12 |
+| `security_identifiers` | 9/12 | 0/12 | 5/12 |
+| `ticker` | 11/12 | 0/12 | 5/12 |
+| `meeting_date` | 11/12 | 0/12 | 5/12 |
+| `meeting_type` | 11/12 | 0/12 | 5/12 |
+| `proposal_number` | 11/12 | 0/12 | 5/12 |
+| `raw_description` | 11/12 | 0/12 | 5/12 |
+| `separate_subject` | 11/12 | 0/12 | 3/12 |
+| `proposal_source` | 11/12 | 0/12 | 3/12 |
+| `participation` | 11/12 | 0/12 | 5/12 |
+| `vote_components` | 11/12 | 0/12 | 1/12 |
+| `management_recommendation` | 11/12 | 0/12 | 4/12 |
 
 ### Findings for `test-eval-001`
 
@@ -218,6 +221,108 @@ Its dataset, prompt, and scorer identities match the first run.
 | Raw `answers.jsonl` SHA-256 | `dc4d10d30962bd20008a21295ae2736e81fa7948fa4e9e0c74a030de971136ad` |
 | Final `report.json` SHA-256 | `fd4b60b05e5bfbce79c9acee0293f8e386748cecbc3b67d2ca770b20896711f6` |
 
+## Luna agent-mediated evaluation
+
+The Luna run finished generation on September 29, 2026.
+It requested `gpt-6-luna` with `low` reasoning effort.
+Astra reviewed all twelve untouched answers at xhigh effort against the original accepted references and supplied source cells.
+Five schema-valid answers required new bound decisions, while seven malformed answers failed automatically.
+The imported decisions changed the scoring report from `PENDING_REVIEW` to `COMPLETE`.
+
+### Separate generation workspace
+
+Generation used a separate, input-only workspace outside this repository: `../proxybench-runs/luna-low-test-eval-001/`.
+The package contained the exact canonical prompt, twelve frozen source contexts, the label contract, and run instructions.
+It contained no accepted labels, previous predictions, or previous scores.
+Scoring and review used the protected references afterward in the separate `../proxybench-runs/luna-low-test-eval-001-review/` folder.
+The original generation files remain unchanged.
+
+The coordinator reports a fresh chat and one new extraction agent per case with `fork_turns="none"`.
+It reports one attempt per case, at most two concurrent agents, no corrective messages, and no retries or answer repairs.
+No tool calls or protocol violations were reported.
+These controls are coordinator-reported, not independently confirmed by complete service traces.
+The saved transport files represent spawn responses and final messages, not the full service dispatch or tool history.
+
+Independent file comparisons confirmed all twelve source strings, their order, and the canonical prompt component against the frozen dataset.
+Each captured request matches the fixed envelope, and each captured answer matches its saved final-message payload.
+All package hashes match, and the capture inventory contains no missing or extra cases.
+The envelope prohibits tools and requests only the first final extraction answer.
+It carries the canonical prompt as text inside a delegated message, not as a separately controlled system-role message.
+Extraction agents also receive platform instructions whose contents are unknown.
+
+Actual model revision, effective effort, tokenizer, sampling, context and output limits, token usage, stop reasons, and cost remain unknown.
+The requested model and effort identify the run, not independently verified service internals.
+The capture status `COMPLETE` means that a final message arrived without a reported protocol violation.
+It does not prove valid JSON, absence of truncation, or successful extraction.
+The review run's initialized resource counter does not measure generation time or cost.
+
+This is an agent-mediated evaluation in a separate workspace, not a verified isolated environment or an independently administered blind benchmark.
+Workspace placement alone does not establish a technical barrier to other files or hidden context.
+The frozen source task and scorer match the local runs, but instruction delivery and generation controls do not.
+The scores therefore do not establish an identical-runtime comparison of bare-model capability, speed, or cost.
+
+### Failures and diagnostics
+
+All five schema-valid answers fail at least one primary field comparison.
+The seven malformed answers contribute 98 automatic field failures.
+The five valid answers contribute ten additional primary field failures, for 60 correct comparisons out of 168.
+This does not mean that every fact inside a malformed answer was wrong.
+No repaired-output or unofficial partial score replaces the frozen score.
+
+| Filing years | Records | First validation failure |
+|---|---|---|
+| 2014 | 1 | The JSON ends inside an unterminated property string. |
+| 2017 | 1 | An absent vote quantity has a nonnull nested value. |
+| 2018, 2019, 2020, 2021 | 4 | Absent `series_identifiers` contain `[]` instead of null. |
+| 2024 | 1 | `participation` uses `DERIVED` as an invalid availability value. |
+
+The 2014 malformed JSON is not a proven response-limit cutoff because the service stop reason and output limit are unknown.
+The table lists the first failure, not every defect.
+For example, the 2017 answer separates all five SEDOLs correctly but still fails the quantity state rules.
+The 2020 answer preserves the disclosed Withhold vote but still fails the absent-identifier rule.
+
+| Filing year | Primary failures among schema-valid answers |
+|---|---|
+| 2013 | Expanded `Mgmt` to `Management`, marked an undisclosed quantity as present, and inferred a recommendation from vote/alignment wording. |
+| 2015 | Marked an undisclosed quantity as a present container with unresolved children. |
+| 2016 | Marked an undisclosed quantity as a present container with unresolved children. |
+| 2022 | Omitted the advisory qualification from the subject, expanded `Mgmt`, and marked an undisclosed quantity as present. |
+| 2023 | Omitted `Portfolio` from the fund-name continuation and the requirement action from the subject. |
+
+Astra rejected subject equivalence for the 2022 and 2023 omissions because they remove meaning from the disclosed subjects.
+The five valid answers produce eight origin diagnostics, two derivation diagnostics, two literal quotation failures, and one semantic quotation failure.
+Origin diagnostics include incorrect tags and added quantity structure, not just incorrect source values.
+Both derivation diagnostics reflect quotation differences in `reporting_scope.scope_type`, not an incorrect scope type.
+The literal failures concern the 2013 subject quotation and the 2016 proposal-number quotation.
+The semantic failure concerns the 2013 recommendation quotation, which belongs to vote/alignment wording instead.
+
+### Retained evidence
+
+Generation evidence remains in `luna-low-test-eval-001/outputs/` under the external runs folder.
+It includes twelve case captures, twelve transport representations, and `run-metadata.json`.
+Protected scoring evidence remains in `luna-low-test-eval-001-review/evaluation/` under that same parent folder.
+It includes rebuilt inputs, raw-answer wrappers, the capture audit, the report, and new bound review decisions.
+The dataset and canonical-prompt component identities match the earlier runs.
+The model-request identity hashes the requested alias and unknown revision, not model weights.
+
+The capture-inventory binding identifies the audited hashes of all 41 generation files.
+The evaluator runtime identity binds the imported capture configuration, not a verified service runtime build.
+File hashes below identify retained raw bytes.
+Evaluator identities and the inventory binding identify structured representations.
+
+| Evidence | Identity or SHA-256 |
+|---|---|
+| Input package manifest SHA-256 | `7efc365ee1852742cc1b2075d513ad3ce7b315fb81802c904fb4a615fafbecfa` |
+| Coordinator `run-metadata.json` SHA-256 | `91e6fc97dc8e709a43894fdeb38f32ec21e0a9c8d0b8a61b467f0b163039bb4b` |
+| Capture-inventory binding | `668e2e3904538e63404ae8f582a3bc33f6558ed526217c2418f94957d435e15f` |
+| Evaluator runtime identity | `1668ab44e34c951dbc4a19b71e09536b13896a059ca5a3579d717555c70b1add` |
+| Model-request identity | `1a439614145265f9822f60e142680fce2835ab2af7f81837a6d9c12a09a09baf` |
+| Scoring `inputs.json` SHA-256 | `b3e924df8428b136853b441aa0b63c766d7c3f9f6674fa0215c8e1d98bc4581b` |
+| Raw-answer wrappers `answers.jsonl` SHA-256 | `3ad7e6506e30d3c53bad05e08eb0c415bf6816f177d65e110efcafccc602b513` |
+| Final `report.json` SHA-256 | `1c60d28d5eeb0faf59b80312e60489d1bbb1b1b31ce3b1dcf4d19fbeefcbd552` |
+| Imported `decisions.json` SHA-256 | `1b8d331fa1d3ce29a00defa67a25e633dea976442765e45e3dc9880e356a847e` |
+| Retained `astra-audit.json` SHA-256 | `54312da3e433fa0be10f14f33827743b96d73d477147057958b3d7bab5389a9e` |
+
 ## Future model comparisons
 
 Use the [evaluation procedure](training.md#selected-model-evaluation) for each new run.
@@ -253,5 +358,6 @@ The exposed 90-record development set remains separate from these results.
 Do not use these results to select prompts, models, thresholds, or replacement records.
 If test findings guide development, identify subsequent runs as regression evaluations rather than untouched tests.
 Regression evaluations measure behavior after changes on an already inspected set.
-This log contains reviewed results for ProxyType-4B and its Qwen3.5-4B base under the same frozen task.
+This log contains reviewed results for ProxyType-4B, its Qwen3.5-4B base, and the separately described Luna agent run.
+The source task and scoring rules remain frozen, while the Luna execution conditions differ.
 Public release remains a separate gate under the [release guide](release.md).
