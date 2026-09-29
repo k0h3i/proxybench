@@ -349,7 +349,6 @@ The original generation files remain unchanged.
 The coordinator reports a fresh chat, `fork_turns="none"`, one new agent per case, and one attempt per case.
 Its concurrency limit was three, with a reported peak of two extraction agents.
 It reports no retries, repairs, corrective messages, tool calls, protocol violations, or outside-workspace access.
-The retained artifacts lack complete service traces to confirm these claims.
 The saved spawn responses identify agents but do not prove the actual model revision or effective effort.
 
 Independent file comparisons confirmed all twelve frozen source strings, case order, package hashes, and the canonical prompt component.
