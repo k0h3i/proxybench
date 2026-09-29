@@ -55,37 +55,39 @@ The imported decisions changed the report from `PENDING_REVIEW` to `COMPLETE`.
 | 2026-09-29 | `test-eval-001` | ProxyType-4B | BF16/F32 GGUF | 11/12 (91.7%) | 8/12 (66.7%) | 151/168 (89.9%) | 2/12 (16.7%) | `COMPLETE` |
 | 2026-09-29 | `qwen-base-test-eval-001` | Qwen3.5-4B base | BF16/F32 GGUF | 0/12 (0%) | 0/12 (0%) | 0/168 (0%) | 0/12 (0%) | `COMPLETE` |
 | 2026-09-29 | `luna-low-test-eval-001` | GPT-6 Luna (requested) | Managed agent, low effort requested | 5/12 (41.7%) | 0/12 (0%) | 60/168 (35.7%) | 0/12 (0%) | `COMPLETE` |
+| 2026-09-29 | `gpt-6-sol-low-test-eval-001` | GPT-6 Sol (requested) | Managed agent, low effort requested | 11/12 (91.7%) | 0/12 (0%) | 140/168 (83.3%) | 0/12 (0%) | `COMPLETE` |
 
-All three reports contain zero missing answers, zero pending reviews, and zero invalid references.
+All four reports contain zero missing answers, zero pending reviews, and zero invalid references.
 All twelve answers in each local GGUF run ended normally without truncation or a generation timeout.
-Luna returned twelve final messages, but its service stop reasons are unknown.
-All three reports declare `valid_accuracy: true`, which means that the workflow permits reporting these scores.
+Luna and Sol each returned twelve final messages, but their service stop reasons are unknown.
+All four reports declare `valid_accuracy: true`, which means that the workflow permits reporting these scores.
 It does not establish population accuracy or independence from model pretraining.
-Luna used different instruction delivery and runtime controls, as described in its section below.
+The agent runs used different instruction delivery and runtime controls from the local runs, as described below.
 
 ### Field results
 
 Each row counts correct primary comparisons out of twelve.
 Each malformed answer contributes one failure to every row.
 ProxyType-4B produced one malformed answer, the base model produced twelve, and Luna produced seven.
+Sol produced one malformed answer.
 The exclusions for derived values above still apply.
 
-| Field | ProxyType-4B | Qwen3.5-4B base | GPT-6 Luna, agent-mediated |
-|---|---|---|---|
-| `reporting_scope` | 10/12 | 0/12 | 4/12 |
-| `series_identifiers` | 11/12 | 0/12 | 5/12 |
-| `issuer_name` | 11/12 | 0/12 | 5/12 |
-| `security_identifiers` | 9/12 | 0/12 | 5/12 |
-| `ticker` | 11/12 | 0/12 | 5/12 |
-| `meeting_date` | 11/12 | 0/12 | 5/12 |
-| `meeting_type` | 11/12 | 0/12 | 5/12 |
-| `proposal_number` | 11/12 | 0/12 | 5/12 |
-| `raw_description` | 11/12 | 0/12 | 5/12 |
-| `separate_subject` | 11/12 | 0/12 | 3/12 |
-| `proposal_source` | 11/12 | 0/12 | 3/12 |
-| `participation` | 11/12 | 0/12 | 5/12 |
-| `vote_components` | 11/12 | 0/12 | 1/12 |
-| `management_recommendation` | 11/12 | 0/12 | 4/12 |
+| Field | ProxyType-4B | Qwen3.5-4B base | GPT-6 Luna, agent-mediated | GPT-6 Sol, agent-mediated |
+|---|---|---|---|---|
+| `reporting_scope` | 10/12 | 0/12 | 4/12 | 11/12 |
+| `series_identifiers` | 11/12 | 0/12 | 5/12 | 10/12 |
+| `issuer_name` | 11/12 | 0/12 | 5/12 | 11/12 |
+| `security_identifiers` | 9/12 | 0/12 | 5/12 | 11/12 |
+| `ticker` | 11/12 | 0/12 | 5/12 | 11/12 |
+| `meeting_date` | 11/12 | 0/12 | 5/12 | 11/12 |
+| `meeting_type` | 11/12 | 0/12 | 5/12 | 11/12 |
+| `proposal_number` | 11/12 | 0/12 | 5/12 | 11/12 |
+| `raw_description` | 11/12 | 0/12 | 5/12 | 11/12 |
+| `separate_subject` | 11/12 | 0/12 | 3/12 | 9/12 |
+| `proposal_source` | 11/12 | 0/12 | 3/12 | 11/12 |
+| `participation` | 11/12 | 0/12 | 5/12 | 11/12 |
+| `vote_components` | 11/12 | 0/12 | 1/12 | 0/12 |
+| `management_recommendation` | 11/12 | 0/12 | 4/12 | 11/12 |
 
 ### Findings for `test-eval-001`
 
@@ -327,6 +329,110 @@ Evaluator identities and the inventory binding identify structured representatio
 | Imported `decisions.json` SHA-256 | `1b8d331fa1d3ce29a00defa67a25e633dea976442765e45e3dc9880e356a847e` |
 | Retained `astra-audit.json` SHA-256 | `54312da3e433fa0be10f14f33827743b96d73d477147057958b3d7bab5389a9e` |
 
+## GPT-6 Sol agent-mediated evaluation
+
+The Sol run finished generation on September 29, 2026.
+It requested `gpt-6-sol` with `low` reasoning effort, not `gpt-6.1-sol`.
+Astra reviewed all twelve untouched answers at xhigh effort against the original accepted references and supplied source cells.
+Eleven schema-valid answers required new bound decisions, while one malformed answer failed automatically.
+The imported decisions changed the scoring report from `PENDING_REVIEW` to `COMPLETE`.
+
+### Separate generation workspace
+
+Generation used a separate, input-only workspace outside this repository: `../proxybench-runs/gpt-6-sol-low-test-eval-001/`.
+It contained the frozen prompt and sources, the label contract, instructions, and a record of the earlier blocked Terra availability check.
+Terra started no cases and contributed no answers to this evaluation.
+The package contained no accepted labels, previous predictions, or previous scores.
+Scoring and review used protected references afterward in the separate `../proxybench-runs/gpt-6-sol-low-test-eval-001-review/` folder.
+The original generation files remain unchanged.
+
+The coordinator reports a fresh chat, `fork_turns="none"`, one new agent per case, and one attempt per case.
+Its concurrency limit was three, with a reported peak of two extraction agents.
+It reports no retries, repairs, corrective messages, tool calls, protocol violations, or outside-workspace access.
+The retained artifacts lack complete service traces to confirm these claims.
+The saved spawn responses identify agents but do not prove the actual model revision or effective effort.
+
+Independent file comparisons confirmed all twelve frozen source strings, case order, package hashes, and the canonical prompt component.
+Each captured request matches the fixed envelope.
+Each captured answer matches its saved final-message payload and separate final-text file.
+The capture inventory contains no missing or extra cases.
+The earlier Terra check remains distinct from Sol generation metadata.
+
+The envelope carries the canonical prompt as text in a delegated message, not as a separately controlled system-role message.
+Extraction agents also receive platform instructions whose contents and effects are unknown.
+Actual model revision, effective effort, tokenizer, sampling, limits, token usage, stop reasons, and cost remain unknown.
+Final-message arrival does not prove absence of truncation or successful extraction.
+The review run's initialized resource counter does not measure generation time or cost.
+
+This is an agent-mediated evaluation in a separate workspace outside the repository.
+It is not a verified isolated environment or an independently administered blind benchmark.
+The source task and scorer match the earlier runs, but generation controls do not match the local GGUF runs.
+The scores do not establish an identical-runtime comparison of bare-model capability, speed, or cost.
+
+### Failures and diagnostics
+
+All twelve records fail the primary record score, but 140 of 168 primary field comparisons pass.
+A record needs every primary field to pass, so one quantity-state mistake can fail an otherwise correct record.
+Zero correct records therefore does not mean that every extracted fact was wrong.
+The malformed 2021 answer contributes fourteen automatic field failures.
+The eleven schema-valid answers contribute fourteen further primary failures.
+
+| Filing years | Primary failure |
+|---|---|
+| 2013–2020, 2022, 2023 | An undisclosed quantity is marked `PRESENT` with unresolved amount and unit children. |
+| 2021 | An absent quantity contains a nonnull nested object, which violates the required structure. |
+| 2022 | The subject omits the disclosed advisory-vote qualification. |
+| 2024 | The subject omits the current approval's nonbinding advisory qualification. |
+| 2024 | The series identifier uses a different disclosed source label, and the quantity unit uses `SHARES VOTED` instead of `SHARES`. |
+
+The ten schema-valid answers with undisclosed quantities require a null quantity value and `ABSENT_IN_CONTEXT` availability.
+Sol instead marks the enclosing quantity as present, although its amount and unit remain absent.
+The 2024 identifier value and numeric quantity are correct.
+Its alternative identifier label and unit heading occur in the source, but they fail the frozen field comparisons.
+These failures are not unsupported quotations, and review does not replace the original answers or references.
+
+Astra accepted five subject paraphrases for 2014, 2015, 2017, 2019, and 2023 under the existing equivalence rule.
+The 2014 paraphrase retains the board powers, additional US$75 million cap, and identified repurchase program.
+The omitted historical approval date identifies that same program but changes no authorization condition.
+Its original `raw_description` also retains the prior approval date.
+The 2019 paraphrase names the same allocation-of-income subject.
+
+The 2022 and 2024 omissions fail equivalence because they remove qualifications from the current voted subject.
+No `OTHER` equivalences applied.
+
+The report counts ten origin diagnostics, four derivation diagnostics, and no literal or semantic quotation failures among schema-valid answers.
+The origin diagnostics reflect the added quantity structure.
+All four derivation diagnostics reflect quotation differences in `reporting_scope.scope_type`, not incorrect scope types.
+Astra also inspected the malformed answer's quotations for diagnosis only.
+That answer receives no imported quotation decision or partial field credit.
+
+### Retained evidence
+
+Generation evidence remains in `gpt-6-sol-low-test-eval-001/outputs/` under the external runs folder.
+It includes twelve captures, twelve final-text files, twelve final-message representations, spawn responses, an agent-list observation, and run metadata.
+Protected scoring evidence remains in `gpt-6-sol-low-test-eval-001-review/evaluation/` under that same parent folder.
+It includes rebuilt inputs, untouched raw-answer wrappers, the capture audit, the report, and new Astra decisions and audit.
+The dataset and canonical-prompt component identities match the earlier runs.
+
+The capture-inventory binding identifies all 56 files in the generation folder, including the blocked Terra check.
+The model-request identity binds the requested alias and unknown revision, not model weights.
+The evaluator runtime identity binds the imported capture configuration, not a verified service runtime build.
+File hashes identify retained bytes, while evaluator identities and the inventory binding identify structured representations.
+
+| Evidence | Identity or SHA-256 |
+|---|---|
+| Input package manifest SHA-256 | `b1a5d0ddc0592bdd1e34e1b4f7239d6e259a5c5d9ce194a0f755d363713fe376` |
+| Coordinator `run-metadata.json` SHA-256 | `89afafa6921b8880220a1f2e9edff7288ee278299056f81a9eaddd4ef630479e` |
+| Capture-inventory binding | `a02ffc4fd007fa7c9aede41dbef12276b45e332959b8af65668cbb874dd6ad4a` |
+| Evaluator runtime identity | `8b53c918003d91f3d2b7d52c1e81b439916d5c428f3494b858e81db132e36aaf` |
+| Model-request identity | `81653abafd05023b2582954c0e5ba4a8159f9ba7f84bb4eec32f73eb77d279ab` |
+| Scoring `inputs.json` SHA-256 | `b3dc6b2e0be7a94ed00345887f92f9176dd54b654f744ccf39fcea4de2b7290e` |
+| Raw-answer wrappers `answers.jsonl` SHA-256 | `5cbe261e56bede3f12bcf28a8c66beea96e86d906d8568a94bf12fc72f2e1e4a` |
+| Final `report.json` SHA-256 | `54362c4c5e9d88b0c6ec96950bf2da9b992001479c7f0cc6b187394802da61ba` |
+| Imported `decisions.json` SHA-256 | `f798c03c852906ce7914d815190073f265785721afa23a73cdb0620a7083ea0e` |
+| `capture-audit.json` SHA-256 | `c3cd6011066abd474888ac2292807a3b58d2af965d9c0c01b0dbd639923967a2` |
+| Retained `astra-audit.json` SHA-256 | `a947670e07fa6e337be643922c560c9646ceafc6eafe382517f578b4279a9d8d` |
+
 ## Future model comparisons
 
 Use the [evaluation procedure](training.md#selected-model-evaluation) for each new run.
@@ -362,6 +468,6 @@ The exposed 90-record development set remains separate from these results.
 Do not use these results to select prompts, models, thresholds, or replacement records.
 If test findings guide development, identify subsequent runs as regression evaluations rather than untouched tests.
 Regression evaluations measure behavior after changes on an already inspected set.
-This log contains reviewed results for ProxyType-4B, its Qwen3.5-4B base, and the separately described Luna agent run.
-The source task and scoring rules remain frozen, while the Luna execution conditions differ.
+This log contains reviewed results for ProxyType-4B, its Qwen3.5-4B base, and the separately described Luna and Sol agent runs.
+The source task and scoring rules remain frozen, while the agent execution conditions differ from the local runs.
 Public release remains a separate gate under the [release guide](release.md).
