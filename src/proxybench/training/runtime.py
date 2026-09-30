@@ -16,6 +16,66 @@ from proxybench.training.preparation import prepare_sequences
 BASE_MODEL = 'Qwen/Qwen3.5-4B'
 BASE_REVISION = '851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a'
 BASE_MANIFEST_SHA256 = '199f252959418e8e7c006b14c7280db752d1e8b10b3428571bb10f9b28407641'
+NINE_B_MODEL = 'Qwen/Qwen3.5-9B'
+NINE_B_REVISION = 'c202236235762e1c871ad0ccb60c8ee5ba337b9a'
+NINE_B_MANIFEST_SHA256 = 'e8c2bd527154c6883661e54767f3c4aed093ecf65c7d114086929a4736507882'
+
+
+def supported_bases():
+    """Keep supported checkpoints bound to exact manifests and revisions."""
+    return {
+        BASE_MODEL: dict(model_revision=BASE_REVISION, base_path='artifacts/models/Qwen3.5-4B',
+                         base_manifest='configs/base-model.json', manifest_sha256=BASE_MANIFEST_SHA256),
+        NINE_B_MODEL: dict(model_revision=NINE_B_REVISION, base_path='artifacts/models/Qwen3.5-9B',
+                           base_manifest='configs/base-model-9b.json', manifest_sha256=NINE_B_MANIFEST_SHA256),
+    }
+
+
+def base_spec(config):
+    spec = supported_bases().get(config.get('model_id'))
+    if spec is None or config.get('model_revision') != spec['model_revision']:
+        raise ValueError('Unsupported base model or revision')
+    return spec
+
+
+def read_base_manifest(config):
+    from proxybench.training.labels import read_json
+    spec = base_spec(config)
+    raw = require_plain_path(config['base_manifest']).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != spec['manifest_sha256']:
+        raise ValueError('Base model manifest differs from its pinned identity')
+    manifest = read_json(raw)
+    if (manifest.get('model_id') != config['model_id']
+            or manifest.get('model_revision') != spec['model_revision']
+            or not isinstance(manifest.get('files'), dict) or not manifest['files']):
+        raise ValueError('Unsupported base model manifest')
+    return manifest
+
+
+def select_base(config, directory):
+    """Resolve a local path into a complete, authenticated model selection."""
+    root = require_plain_path(directory)
+    configuration_path = require_plain_path(root / 'config.json')
+    if not configuration_path.is_file():
+        raise ValueError('Model configuration must be a regular file')
+    configuration_hash = digest(configuration_path)
+    for model_id, spec in supported_bases().items():
+        candidate = dict(config, model_id=model_id, model_revision=spec['model_revision'],
+                         base_path=str(root), base_manifest=spec['base_manifest'])
+        if read_base_manifest(candidate)['files'].get('config.json') == configuration_hash:
+            base_snapshot(candidate)
+            return candidate
+    raise ValueError('Model directory does not match a supported pinned checkpoint')
+
+
+def require_adapter_base(adapter, config):
+    """Reject adapter-to-base mismatches before importing GPU packages."""
+    from proxybench.training.checkpoints import read_object
+    base_spec(config)
+    metadata = read_object(Path(adapter) / 'adapter_config.json', 'Adapter metadata')
+    if (metadata.get('base_model_name_or_path') != config['model_id']
+            or metadata.get('revision') != config['model_revision']):
+        raise ValueError('Adapter metadata differs from the selected pinned base')
 
 
 def binding(value):
@@ -63,25 +123,17 @@ def require_plain_path(value):
 def base_model_path(config):
     root = require_plain_path(config['base_path'])
     artifacts = Path.cwd().resolve() / 'artifacts'
-    if root.is_relative_to(artifacts) and root != artifacts / 'models/Qwen3.5-4B':
-        raise ValueError('Use the retained Qwen3.5-4B base model directory')
+    expected = base_spec(config)['base_path'] if 'model_id' in config else 'artifacts/models/Qwen3.5-4B'
+    if root.is_relative_to(artifacts) and root != Path.cwd().resolve() / expected:
+        raise ValueError('Use the retained ' + Path(expected).name + ' base model directory')
     return root
 
 
 def base_snapshot(config):
     """Authenticate the complete local base snapshot without network access."""
-    from proxybench.training.labels import read_json
-    if config['model_id'] != BASE_MODEL or config['model_revision'] != BASE_REVISION:
-        raise ValueError('Unsupported base model or revision')
+    spec = base_spec(config)
     root = base_model_path(config)
-    manifest_path = require_plain_path(config['base_manifest'])
-    raw = manifest_path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != BASE_MANIFEST_SHA256:
-        raise ValueError('Base model manifest differs from its pinned identity')
-    manifest = read_json(raw)
-    if (manifest.get('model_id') != BASE_MODEL or manifest.get('model_revision') != BASE_REVISION
-            or not isinstance(manifest.get('files'), dict) or not manifest['files']):
-        raise ValueError('Unsupported base model manifest')
+    manifest = read_base_manifest(config)
     expected = manifest['files']
     for name, expected_hash in expected.items():
         relative = Path(name)
@@ -95,7 +147,7 @@ def base_snapshot(config):
         if digest(path) != expected_hash:
             raise ValueError('Base model file differs from its pinned hash')
     metadata = {'.cache/huggingface/.gitignore', '.cache/huggingface/CACHEDIR.TAG',
-                f'.cache/huggingface/trees/{BASE_REVISION}.json'}
+                f'.cache/huggingface/trees/{spec["model_revision"]}.json'}
     metadata.update(f'.cache/huggingface/download/{name}{suffix}'
                     for name in expected for suffix in ('.metadata', '.lock'))
     # The comparison GGUF is separate from the authenticated HF checkpoint.
@@ -133,6 +185,7 @@ def load_base(config, snapshot=None):
 
 
 def attach_adapter(model, config, output):
+    base_spec(config)
     from unsloth import FastLanguageModel
     import torch
     targets, unsupported = adapter_targets(model.named_modules(), torch.nn.Linear)
@@ -146,8 +199,8 @@ def attach_adapter(model, config, output):
     if any('lora_' not in n for n, p in model.named_parameters() if p.requires_grad):
         raise ValueError('Unexpected trainable parameters')
     # Saving uses a portable base identity. Loading still pins base_snapshot above.
-    model.peft_config['default'].base_model_name_or_path = BASE_MODEL
-    model.peft_config['default'].revision = BASE_REVISION
+    model.peft_config['default'].base_model_name_or_path = config['model_id']
+    model.peft_config['default'].revision = config['model_revision']
     return model
 
 
@@ -242,7 +295,7 @@ def _train(dataset, run_dir, config, resume, measurements):
     kernels['device_event_profiling'] = profile
     runtime = capture_runtime_identity(
         model=dict(model_id=config['model_id'], revision=config['model_revision'],
-                   manifest_sha256=BASE_MANIFEST_SHA256, architecture=type(base).__name__,
+                   manifest_sha256=base_spec(config)['manifest_sha256'], architecture=type(base).__name__,
                    training_loop='custom'),
         tokenizer=tokenizer_identity(snapshot), optimizer=optimizer_identity(model, optimizer),
         hardware=hardware, kernels=kernels)
@@ -325,6 +378,7 @@ def _train(dataset, run_dir, config, resume, measurements):
 
 
 def export_adapter(adapter, output, config):
+    require_adapter_base(adapter, config)
     from unsloth import FastLanguageModel
     from peft import get_peft_model_state_dict, set_peft_model_state_dict
     from safetensors.torch import load_file
@@ -417,6 +471,7 @@ def export_model(adapter, run_dir, config, *, remaining_seconds=None):
         if (root/'merged').exists():
             shutil.rmtree(root/'merged')
         return recovered
+    require_adapter_base(adapter, config)
     from proxybench.execution.resources import ledger_entries
     prior = sum(row['elapsed_seconds'] for row in ledger_entries(root/'resources.jsonl'))
     ceiling = None if remaining_seconds is None else prior + remaining_seconds
@@ -575,6 +630,7 @@ def add_cli(subparsers):
     p.add_argument('--config', default='configs/inference.json')
     p.add_argument('--training-config', default='configs/training.json')
     p.add_argument('--adapter', default='artifacts/models/ProxyType-4B/adapter')
+    p.add_argument('--model', help='Local directory of the matching pinned BF16 base model')
     p.set_defaults(handler=validate_runtime)
     for operation in ('train', 'export', 'infer'):
         p = subparsers.add_parser(operation)
@@ -582,8 +638,10 @@ def add_cli(subparsers):
         p.add_argument('--run-dir', required=True)
         if operation == 'train':
             p.add_argument('--dataset', default='data/training-dataset')
+            p.add_argument('--model', help='Local directory of a supported pinned BF16 base model')
         elif operation == 'export':
             p.add_argument('--adapter', required=True)
+            p.add_argument('--model', help='Local directory of the matching pinned BF16 base model')
         else:
             p.add_argument('--input', required=True)
             p.add_argument('--model')
@@ -594,9 +652,16 @@ def cli(args):
     from proxybench.runstate import Run
     from proxybench.execution.resources import ledger_entries
     config = load_config(args.config)
-    if getattr(args, 'model', None):
-        config['model'] = str(Path(args.model).resolve())
     operation = 'infer' if hasattr(args, 'input') else 'train' if hasattr(args, 'dataset') else 'export'
+    if getattr(args, 'model', None):
+        if operation == 'infer':
+            config['model'] = str(Path(args.model).resolve())
+        else:
+            config = select_base(config, args.model)
+    if operation == 'train' and not getattr(args, 'model', None):
+        base_snapshot(config)
+    elif operation == 'export':
+        require_adapter_base(args.adapter, config)
     identity = dict(operation=operation, recipe=binding(config), prompt=digest(config['system_prompt']))
     if operation == 'infer':
         from proxybench.extraction.runtime import runtime_identity

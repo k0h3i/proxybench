@@ -57,6 +57,43 @@ Restart the host if the driver installation requests it.
 nvidia-smi
 ```
 
+On a Windows host with 32 GB of RAM, WSL2 normally exposes about half that memory to Linux.
+For 9B training, start with a 24 GB limit and leave about 8 GB for Windows.
+This is a starting allocation, not evidence that training fits.
+The [Microsoft WSL configuration guide](https://learn.microsoft.com/en-us/windows/wsl/wsl-config) defines the file and restart procedure.
+
+From Windows PowerShell, open `%UserProfile%\.wslconfig`:
+
+```powershell
+notepad "$env:USERPROFILE\.wslconfig"
+```
+
+If the file already contains `[wsl2]`, edit its existing memory values instead of adding another section.
+Keep unrelated configuration values.
+Otherwise, create this section:
+
+```ini
+[wsl2]
+memory=24GB
+swap=8GB
+```
+
+Swap uses disk space when RAM runs short.
+It does not increase GPU memory or replace RAM for fast training.
+Save the file as `.wslconfig`, not `.wslconfig.txt`.
+After active work finishes, save your work and run this command in Windows PowerShell.
+The command stops all WSL distributions and their running processes.
+
+```powershell
+wsl --shutdown
+```
+
+Reopen WSL and inspect the available memory:
+
+```bash
+free -h
+```
+
 If you need a repository checkout, clone the private repository with your authorized GitHub account:
 
 ```bash

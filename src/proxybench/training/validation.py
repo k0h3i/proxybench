@@ -78,6 +78,8 @@ def synthetic_fragments(directory):
 
 
 def validate_adapter(adapter, output, config):
+    from proxybench.training.runtime import require_adapter_base
+    require_adapter_base(adapter, config)
     from unsloth import FastLanguageModel
     from safetensors.torch import load_file
     from peft import get_peft_model_state_dict, set_peft_model_state_dict
@@ -111,10 +113,21 @@ def validate_adapter(adapter, output, config):
 
 def validate_runtime(args):
     from proxybench.extraction.runtime import load_config, source_messages, supervised_generate_answers
-    from proxybench.training.runtime import launch
+    from proxybench.training.runtime import launch, select_base, require_adapter_base
     training = load_config(args.training_config)
+    if getattr(args, 'model', None):
+        training = select_base(training, args.model)
     inference = load_config(args.config)
     require_project_environment(training, inference)
+    require_adapter_base(args.adapter, training)
+    require_adapter_base(inference['tokenizer'], training)
+    from proxybench.training.checkpoints import read_object
+    model_info = Path(inference['model']).parent / 'model-info.json'
+    if model_info.exists():
+        metadata = read_object(model_info, 'GGUF model metadata')
+        if (metadata.get('base_model') != training['model_id']
+                or metadata.get('base_revision') != training['model_revision']):
+            raise ValueError('GGUF model metadata differs from the selected pinned base')
     output = Path(args.run_dir)
     output.mkdir(parents=True, exist_ok=False)
     inference['limits'] = {**inference['limits'], 'phase_seconds': 600, 'total_seconds': 600}

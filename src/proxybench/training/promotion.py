@@ -56,9 +56,9 @@ def promote(run_dir, models_dir, name):
             if (publication != expected or export_identity.get('tokenizer') != tokenizer
                     or source != dict(identity=export_identity, merged_manifest_sha256=value['source_manifest_sha256'])):
                 raise ValueError('The adapter and converted model publication chain differs')
-            from proxybench.training.runtime import BASE_MODEL, BASE_REVISION
-            if config.get('base_model_name_or_path') != BASE_MODEL or config.get('revision') != BASE_REVISION:
-                raise ValueError('Adapter metadata must name the pinned portable base')
+            from proxybench.training.runtime import base_spec
+            base_model, base_revision = config.get('base_model_name_or_path'), config.get('revision')
+            base_spec(dict(model_id=base_model, model_revision=base_revision))
             stage = Path(tempfile.mkdtemp(prefix='.' + name + '-', dir=root))
             (stage / 'adapter').mkdir()
             hashes = {}
@@ -71,8 +71,8 @@ def promote(run_dir, models_dir, name):
                     raise ValueError('Model bytes changed during promotion')
                 hashes[str(relative)] = before
             atomic_json(stage / 'model-info.json', dict(
-                schema_version='model-info-v1', name=name, base_model=BASE_MODEL,
-                base_revision=BASE_REVISION, files=hashes,
+                schema_version='model-info-v1', name=name, base_model=base_model,
+                base_revision=base_revision, files=hashes,
                 input_identity=run.state.get('training_identity', run.state['identity']),
                 load_validation='pending-user-launched-gpu-tests'))
             if destination.exists():

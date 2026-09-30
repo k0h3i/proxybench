@@ -1,7 +1,8 @@
 # Training and evaluation
 
 Training uses the private dataset and [portable recipe](../configs/training.json).
-The base model is `Qwen/Qwen3.5-4B`, revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`.
+The default base model is `Qwen/Qwen3.5-4B`, revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`.
+Training also supports the pinned `Qwen/Qwen3.5-9B` checkpoint, revision `c202236235762e1c871ad0ccb60c8ee5ba337b9a`.
 Complete the [preparation guide](preparation.md) before model execution.
 It covers Python packages, the compiler, llama.cpp, native libraries, base weights, and private inputs.
 Export and evaluation of a new adapter also require the authenticated converter installation in the [preparation guide](preparation.md#obtain-converter-source-for-export).
@@ -33,6 +34,23 @@ The run metadata records input identities, effective configuration, progress, an
 .venv/bin/python -m proxybench status --run-dir ../proxybench-runs/run-001
 .venv/bin/python -m proxybench resume --run-dir ../proxybench-runs/run-001
 ```
+
+Use `--model` to select a local base directory:
+
+```bash
+.venv/bin/python -m proxybench train --model artifacts/models/Qwen3.5-9B --config configs/training.json --run-dir ../proxybench-runs/qwen-9b-train-001
+```
+
+The parameter selects the model identity, revision, and manifest together.
+The command authenticates every checkpoint file before it starts a worker.
+Only the pinned 4B and 9B checkpoints are supported.
+Without this parameter, the command uses the base in the training configuration.
+
+Saved adapters and run metadata name the selected base.
+Resume uses the saved selection and rejects a changed recipe.
+Use the same `--model` parameter when exporting or validating an adapter that uses a different base from the default.
+For validation, `--model` selects only the adapter's base.
+Also supply an inference configuration with the matching GGUF and tokenizer through `--config`.
 
 Training validates the dataset and prepares sequences before loading the model.
 It saves future checkpoints under `checkpoints/` and the completed adapter under `adapter/`.

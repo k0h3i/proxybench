@@ -148,6 +148,13 @@ class ResumeTests(unittest.TestCase):
         self.prompt.write_text('Changed policy')
         self.rejected('prompt differs')
 
+    def test_changing_selected_model_rejects_resume_before_gpu_import(self):
+        from proxybench.training.runtime import NINE_B_MODEL, NINE_B_REVISION
+        self.config.update(model_id=NINE_B_MODEL, model_revision=NINE_B_REVISION,
+                           base_path='artifacts/models/Qwen3.5-9B', base_manifest='configs/base-model-9b.json')
+        self.write('run.json', self.run)
+        self.rejected('identity differs')
+
     def test_metadata_inventory_and_publication_are_checked_before_deserialization(self):
         original = json.loads((self.checkpoint / 'manifest.json').read_text())
         cases = [None, [], {}, dict(original, identity=[]), dict(original, identity={'other': 'identity'}),

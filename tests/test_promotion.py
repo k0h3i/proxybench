@@ -5,11 +5,16 @@ import unittest
 
 from proxybench.runstate import Run, atomic_json, file_hash
 from proxybench.training.promotion import promote
-from proxybench.training.runtime import BASE_MODEL, BASE_REVISION
+from proxybench.training.runtime import BASE_MODEL, BASE_REVISION, NINE_B_MODEL, NINE_B_REVISION
 
 
 class PromotionTests(unittest.TestCase):
     def test_only_selected_formats_are_published_and_overwrite_is_rejected(self):
+        for model, revision in ((BASE_MODEL, BASE_REVISION), (NINE_B_MODEL, NINE_B_REVISION)):
+            with self.subTest(model=model):
+                self.check_publication(model, revision)
+
+    def check_publication(self, model, revision):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             path = root / 'run'
@@ -18,7 +23,7 @@ class PromotionTests(unittest.TestCase):
                 adapter.mkdir()
                 for name in ('adapter_model.safetensors', 'tokenizer.json', 'tokenizer_config.json', 'chat_template.jinja'):
                     (adapter / name).write_text('test')
-                atomic_json(adapter / 'adapter_config.json', dict(base_model_name_or_path=BASE_MODEL, revision=BASE_REVISION))
+                atomic_json(adapter / 'adapter_config.json', dict(base_model_name_or_path=model, revision=revision))
                 identity = dict(
                     adapter=file_hash(adapter / 'adapter_model.safetensors'),
                     adapter_config=file_hash(adapter / 'adapter_config.json'), recipe='recipe',
@@ -38,6 +43,9 @@ class PromotionTests(unittest.TestCase):
             result = promote(path, root / 'models', 'Example-4B')
             selected = Path(result['model'])
             self.assertEqual(set(p.name for p in selected.iterdir()), {'adapter', 'model-bf16.gguf', 'model-info.json'})
+            metadata = json.loads((selected / 'model-info.json').read_text())
+            self.assertEqual(metadata['base_model'], model)
+            self.assertEqual(metadata['base_revision'], revision)
             self.assertFalse((selected / 'adapter' / 'private-run-history.json').exists())
             with self.assertRaises(FileExistsError):
                 promote(path, root / 'models', 'Example-4B')
