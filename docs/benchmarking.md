@@ -56,11 +56,12 @@ The imported decisions changed the report from `PENDING_REVIEW` to `COMPLETE`.
 | 2026-09-29 | `qwen-base-test-eval-001` | Qwen3.5-4B base | BF16/F32 GGUF | 0/12 (0%) | 0/12 (0%) | 0/168 (0%) | 0/12 (0%) | `COMPLETE` |
 | 2026-09-29 | `luna-low-test-eval-001` | GPT-6 Luna (requested) | Managed agent, low effort requested | 5/12 (41.7%) | 0/12 (0%) | 60/168 (35.7%) | 0/12 (0%) | `COMPLETE` |
 | 2026-09-29 | `gpt-6-sol-low-test-eval-001` | GPT-6 Sol (requested) | Managed agent, low effort requested | 11/12 (91.7%) | 0/12 (0%) | 140/168 (83.3%) | 0/12 (0%) | `COMPLETE` |
+| 2026-09-30 | `qwen-9b-test-eval-001` | ProxyType-9B | BF16/F32 GGUF | 11/12 (91.7%) | 9/12 (75%) | 152/168 (90.5%) | 0/12 (0%) | `COMPLETE` |
 
-All four reports contain zero missing answers, zero pending reviews, and zero invalid references.
+All five reports contain zero missing answers, zero pending reviews, and zero invalid references.
 All twelve answers in each local GGUF run ended normally without truncation or a generation timeout.
 Luna and Sol each returned twelve final messages, but their service stop reasons are unknown.
-All four reports declare `valid_accuracy: true`, which means that the workflow permits reporting these scores.
+All five reports declare `valid_accuracy: true`, which means that the workflow permits reporting these scores.
 It does not establish population accuracy or independence from model pretraining.
 The agent runs used different instruction delivery and runtime controls from the local runs, as described below.
 
@@ -68,26 +69,26 @@ The agent runs used different instruction delivery and runtime controls from the
 
 Each row counts correct primary comparisons out of twelve.
 Each malformed answer contributes one failure to every row.
-ProxyType-4B produced one malformed answer, the base model produced twelve, and Luna produced seven.
+ProxyType-4B and ProxyType-9B each produced one malformed answer, the base model produced twelve, and Luna produced seven.
 Sol produced one malformed answer.
 The exclusions for derived values above still apply.
 
-| Field | ProxyType-4B | Qwen3.5-4B base | GPT-6 Luna, agent-mediated | GPT-6 Sol, agent-mediated |
-|---|---|---|---|---|
-| `reporting_scope` | 10/12 | 0/12 | 4/12 | 11/12 |
-| `series_identifiers` | 11/12 | 0/12 | 5/12 | 10/12 |
-| `issuer_name` | 11/12 | 0/12 | 5/12 | 11/12 |
-| `security_identifiers` | 9/12 | 0/12 | 5/12 | 11/12 |
-| `ticker` | 11/12 | 0/12 | 5/12 | 11/12 |
-| `meeting_date` | 11/12 | 0/12 | 5/12 | 11/12 |
-| `meeting_type` | 11/12 | 0/12 | 5/12 | 11/12 |
-| `proposal_number` | 11/12 | 0/12 | 5/12 | 11/12 |
-| `raw_description` | 11/12 | 0/12 | 5/12 | 11/12 |
-| `separate_subject` | 11/12 | 0/12 | 3/12 | 9/12 |
-| `proposal_source` | 11/12 | 0/12 | 3/12 | 11/12 |
-| `participation` | 11/12 | 0/12 | 5/12 | 11/12 |
-| `vote_components` | 11/12 | 0/12 | 1/12 | 0/12 |
-| `management_recommendation` | 11/12 | 0/12 | 4/12 | 11/12 |
+| Field | ProxyType-4B | ProxyType-9B | Qwen3.5-4B base | GPT-6 Luna, agent-mediated | GPT-6 Sol, agent-mediated |
+|---|---|---|---|---|---|
+| `reporting_scope` | 10/12 | 10/12 | 0/12 | 4/12 | 11/12 |
+| `series_identifiers` | 11/12 | 11/12 | 0/12 | 5/12 | 10/12 |
+| `issuer_name` | 11/12 | 11/12 | 0/12 | 5/12 | 11/12 |
+| `security_identifiers` | 9/12 | 10/12 | 0/12 | 5/12 | 11/12 |
+| `ticker` | 11/12 | 11/12 | 0/12 | 5/12 | 11/12 |
+| `meeting_date` | 11/12 | 11/12 | 0/12 | 5/12 | 11/12 |
+| `meeting_type` | 11/12 | 11/12 | 0/12 | 5/12 | 11/12 |
+| `proposal_number` | 11/12 | 11/12 | 0/12 | 5/12 | 11/12 |
+| `raw_description` | 11/12 | 11/12 | 0/12 | 5/12 | 11/12 |
+| `separate_subject` | 11/12 | 11/12 | 0/12 | 3/12 | 9/12 |
+| `proposal_source` | 11/12 | 11/12 | 0/12 | 3/12 | 11/12 |
+| `participation` | 11/12 | 11/12 | 0/12 | 5/12 | 11/12 |
+| `vote_components` | 11/12 | 11/12 | 0/12 | 1/12 | 0/12 |
+| `management_recommendation` | 11/12 | 11/12 | 0/12 | 4/12 | 11/12 |
 
 ### Findings for `test-eval-001`
 
@@ -136,7 +137,6 @@ The per-request timeout was 60 seconds.
 Recorded worker execution was 180.65 seconds, including model loading, requests, and cleanup.
 This duration excludes semantic review and CPU report preparation.
 The answers contain 10,376 output tokens, including end tokens.
-The recorded decode-rate metric is null, so this document makes no measured decoding-throughput claim.
 
 Hashes identify exact content or evaluator identities.
 Evaluator identities below are bound representations, not hashes of raw JSON file bytes.
@@ -212,7 +212,6 @@ Recorded worker execution was 187.24 seconds, excluding the separate audit and C
 The answers contain 11,361 output tokens, including end tokens.
 The largest answer used 1,251 tokens, below the 1,792-token response limit.
 All twelve ended normally without truncation or a timeout.
-All recorded decode-rate metrics are null.
 
 Private evidence remains in `../proxybench-runs/qwen-base-test-eval-001/`, relative to the repository root.
 It includes the raw answers, input records, report, capture records, and runtime configuration.
@@ -226,6 +225,75 @@ Its dataset, prompt, and scorer identities match the first run.
 | `inputs.json` SHA-256 | `4bd885d18f7ebcdd209974a910589c515c43e2bb7137193cb06e9bf9faf34fa6` |
 | Raw `answers.jsonl` SHA-256 | `dc4d10d30962bd20008a21295ae2736e81fa7948fa4e9e0c74a030de971136ad` |
 | Final `report.json` SHA-256 | `fd4b60b05e5bfbce79c9acee0293f8e386748cecbc3b67d2ca770b20896711f6` |
+
+## ProxyType-9B comparison
+
+The 9B run finished generation on September 30, 2026.
+Astra (`gpt-6-astra`) reviewed all twelve original answers at xhigh effort against the supplied source cells and frozen references.
+Eleven new bound decisions completed scoring, while one malformed answer failed automatically.
+No subject or `OTHER` equivalence overrides applied, and no scoring or reference blocker remained.
+The original predictions and frozen labels remain unchanged.
+
+ProxyType-9B uses the final adapter after 660 updates over two epochs.
+Its base is Qwen3.5-9B at revision `c202236235762e1c871ad0ccb60c8ee5ba337b9a`.
+The evaluated model is `artifacts/models/ProxyType-9B/model-bf16.gguf`.
+
+The dataset, case order, source cells, references, system instructions, rendered prompts, and prompt token IDs match the ProxyType-4B run.
+Both runs use the same native runtime manifest, RTX 3090, generation controls, token limits, request timeout, and cache policy.
+The saved effective configuration differs only in model and tokenizer paths.
+The evaluator runtime identity differs because it binds that configuration and the tokenizer files.
+
+### Failures and diagnostics
+
+Three records fail the primary record score.
+The malformed answer contributes fourteen automatic field failures, and the two valid failing answers contribute one field failure each.
+This leaves 152 correct comparisons out of 168.
+
+| Filing year | Failure |
+|---|---|
+| 2017 | Omitted `Security` identifier `G021A5106` and combined five separate SEDOLs into one value. |
+| 2023 | Omitted `Portfolio` from the continued fund name. |
+| 2024 | Absent ISIN and FIGI values contain `-` and use `EXTRACTED` origin instead of null value and origin. |
+
+The 2024 answer is valid JSON but fails the label schema.
+Its first validator error is `security_identifiers[1].value: unresolved value and origin must be null`.
+It ended normally after 1,305 output tokens, below the 1,792-token limit, without truncation.
+Astra also found that this answer misplaces the series identifier among security identifiers and uses the voting frequency as a quantity unit.
+These additional findings remain diagnostic observations, not unofficial partial scores.
+
+All nine source-value-correct answers differ from the accepted references only in `raw_text`.
+Their values, availability states, origin tags, and list order match.
+Supported quotation differences and null quotations therefore leave zero exact records without making those nine records factually wrong.
+
+The report counts one origin diagnostic, three derivation diagnostics, no literal quotation failures, and two semantic quotation failures.
+The origin diagnostic reflects changed security-identifier membership, not an incorrect origin tag.
+All three derivation diagnostics reflect quotation differences in `reporting_scope.scope_type`, whose values and origins remain correct.
+The semantic failures concern the combined SEDOL quotation and the incomplete fund-name quotation.
+Astra also inspected the malformed answer's quotations, but that answer receives no imported quotation decision or partial field credit.
+
+### Run conditions and evidence
+
+Recorded worker execution was 278.51 seconds, including model loading, requests, and cleanup.
+This excludes semantic review and CPU report preparation.
+The twelve answers contain 10,727 output tokens, including end tokens, and all ended normally without truncation or a timeout.
+
+Private evidence remains in `../proxybench-runs/qwen-9b-test-eval-001/`, relative to the repository root.
+It includes original inputs, answers, capture records, the final report, and imported review decisions.
+`evaluation/review/astra-decisions.json` retains Astra's original decision list, while `decisions.json` contains the imported decision map.
+`evaluation/review/astra-audit.json` records the source review and independent capture-integrity checks.
+The dataset, canonical prompt, and scorer identities match the earlier local runs.
+
+| Evidence | Identity or SHA-256 |
+|---|---|
+| Evaluator runtime identity | `7f7ff406be6e190630ab1a0a43809b70bc52dec000da3d419344d93699285709` |
+| Model GGUF SHA-256 | `fad63488e992191f83d6565d2ac2b34e01eccfaef971e2936a53a32188e55c24` |
+| Native runtime manifest SHA-256 | `ea841a7275693bc0edcb6286cb27668698f4b3a2b1ed4ef0a18b82352d79d2a7` |
+| `inputs.json` SHA-256 | `39ac78e69fab0568bc086206245e17913ea1a9c91f1c0512c788353692069550` |
+| Raw `answers.jsonl` SHA-256 | `d34eee1bcfb0032b8ec4669a7d2f829869e1a936ed58d104ed47a082ac6c0d0e` |
+| Final `report.json` SHA-256 | `1493295778eb1e72d6c33e006bdcf23032f562c6797732bc873396d639ae12dd` |
+| Imported `decisions.json` SHA-256 | `9346c38819a9e150017f0da51b6896fcf021c8fdbddb22d50ea64afd09b006c8` |
+| Original `astra-decisions.json` SHA-256 | `a852c5e15ef1720890f31dc7bdea9c56527f3cd1fcc6e33ba5bdc967014cbd68` |
+| Retained `astra-audit.json` SHA-256 | `a0786784ee4a6eb4d1218582f8dd98d74609d06907e2017c760c8d3182c0307d` |
 
 ## Luna agent-mediated evaluation
 
@@ -467,6 +535,6 @@ The exposed 90-record development set remains separate from these results.
 Do not use these results to select prompts, models, thresholds, or replacement records.
 If test findings guide development, identify subsequent runs as regression evaluations rather than untouched tests.
 Regression evaluations measure behavior after changes on an already inspected set.
-This log contains reviewed results for ProxyType-4B, its Qwen3.5-4B base, and the separately described Luna and Sol agent runs.
+This log contains reviewed results for ProxyType-4B, ProxyType-9B, the Qwen3.5-4B base, and the separately described Luna and Sol agent runs.
 The source task and scoring rules remain frozen, while the agent execution conditions differ from the local runs.
 Public release remains a separate gate under the [release guide](release.md).
