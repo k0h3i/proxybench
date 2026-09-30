@@ -2,7 +2,7 @@
 
 [![Code License: Apache 2.0](https://img.shields.io/badge/Code_License-Apache_2.0-green.svg)](LICENSE)
 [![Data: Private](https://img.shields.io/badge/Data-Private-red.svg)](DATA_NOTICE.md)
-[![Model Weights: Private](https://img.shields.io/badge/Model_Weights-Private-yellow.svg)](MODEL_CARD.md#license-access-and-references)
+[![Model Adapters: Hugging Face](https://img.shields.io/badge/Model_Adapters-Hugging_Face-yellow.svg)](https://huggingface.co/rvcarung/ProxyType-4B)
 [![CPU Python: 3.11+](https://img.shields.io/badge/CPU_Python-3.11%2B-blue.svg)](pyproject.toml)
 [![Model Python: 3.12.14](https://img.shields.io/badge/Model_Python-3.12.14-blue.svg)](docs/preparation.md#required-software-and-inputs)
 
@@ -17,9 +17,9 @@ The repository provides tools for the following tasks:
 - [Extract a record from a marked fragment](#using-the-model).
 - [Evaluate answers against development references](#evaluation).
 
-The accepted dataset and model weights remain private and are separate inputs.
+The [ProxyType-4B](https://huggingface.co/rvcarung/ProxyType-4B) and [ProxyType-9B](https://huggingface.co/rvcarung/ProxyType-9B) adapters are public on Hugging Face.
+The accepted dataset and merged GGUF files remain private and are separate inputs.
 The project makes no independently benchmarked accuracy claim.
-Public release and portable model loading tests remain pending.
 
 ## Overview
 
@@ -243,7 +243,7 @@ The [repository guide](docs/repository-layout.md) explains these storage boundar
 
 Complete the CPU acceptance tests before starting GPU work.
 The user launches GPU training, loading, and inference commands.
-Portable loading tests remain pending, so keep the last working model originals until both retained formats pass.
+Keep the last working model originals until both retained formats pass loading tests.
 The [training guide](docs/training.md#gpu-acceptance-and-promotion) describes that acceptance step.
 
 ## Using the model
@@ -252,6 +252,10 @@ Inference means generating an answer from a model.
 The supported input contains source context with exactly one `BEGIN MARKED TARGET` and `END MARKED TARGET` pair.
 The inference command supplies the canonical system prompt separately.
 The [inference guide](docs/inference.md) explains input preparation and the supported command.
+
+Download the [4B adapter](https://huggingface.co/rvcarung/ProxyType-4B) or [9B adapter](https://huggingface.co/rvcarung/ProxyType-9B) from Hugging Face.
+Each repository includes the adapter configuration, tokenizer files, exact system prompt, and model card.
+The adapter still requires its matching pinned base weights.
 
 The retained model has two forms:
 
@@ -288,7 +292,7 @@ Review decisions apply to those specific inputs, and changed answers require new
 The [evaluation procedure](docs/training.md#selected-model-evaluation) covers generation, review, resume, and report creation.
 The [benchmark log](docs/benchmarking.md) records reviewed test results and conditions for future model comparisons.
 The [CPU tests](tests/README.md) exercise behavior with small synthetic sources and model substitutes.
-Those tests do not establish model accuracy or replace the pending GPU loading and answer comparisons.
+Those tests do not establish model accuracy or replace GPU loading and answer comparisons for future changes.
 
 ## Limitations and release status
 

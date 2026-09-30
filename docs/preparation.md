@@ -25,7 +25,7 @@ Other platforms need a separately tested installation procedure.
 | OpenMP, OpenSSL, and C++ runtime libraries | Native llama.cpp loading | Ubuntu `libgomp1`, `libssl-dev`, and `build-essential` |
 | Pinned base weights | Training, adapter loading, and export | Hugging Face download below |
 | Pinned converter source | Export and evaluation of a new adapter | Authenticated source archive below |
-| Selected adapter, tokenizer, and GGUF | Existing ProxyType-4B loading and inference | Private retained model files |
+| Selected adapter, tokenizer, and GGUF | Existing ProxyType-4B loading and inference | Public adapter repositories below; private retained GGUF |
 | Accepted dataset and original sources | Training, evaluation, and source reconstruction | Private retained data or the [dataset workflow](dataset.md) |
 
 Python packages do not install the NVIDIA driver or the llama.cpp executable.
@@ -94,7 +94,7 @@ Reopen WSL and inspect the available memory:
 free -h
 ```
 
-If you need a repository checkout, clone the private repository with your authorized GitHub account:
+If you need a repository checkout, clone the repository with your authorized GitHub account:
 
 ```bash
 git clone https://github.com/k0h3i/proxybench.git
@@ -263,8 +263,9 @@ Model execution uses the retained files without a separate download cache.
 The original checkpoint contains BF16 weights and a small set of FP32 parameters.
 Keep those original dtypes unchanged.
 
-A Git clone contains no private model weights or accepted labels.
-Obtain the retained files from the project's authorized private copy.
+A Git clone contains no model weights or accepted labels.
+Download the adapter and tokenizer files from [ProxyType-4B](https://huggingface.co/rvcarung/ProxyType-4B) or [ProxyType-9B](https://huggingface.co/rvcarung/ProxyType-9B).
+Obtain the retained GGUF, local model metadata, sources, and accepted labels from the project's authorized private copy.
 Place them at these paths:
 
 | Input | Destination |
@@ -279,7 +280,7 @@ Place them at these paths:
 The [model guide](../artifacts/README.md) and [data guide](../data/README.md) define those folders.
 If accepted labels are unavailable, follow the [dataset workflow](dataset.md) to prepare and accept new examples.
 New examples do not reproduce the retained 330/90 dataset.
-No public download of ProxyType-4B or its private labels is currently declared.
+The adapters are public, while the merged GGUF files and accepted labels remain private.
 
 ## Obtain converter source for export
 

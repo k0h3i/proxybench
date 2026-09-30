@@ -2,7 +2,8 @@
 
 ProxyType-4B is intended for research on extracting proxy-voting records from historical SEC Form N-PX text and HTML.
 It takes one manually marked voting target with its source context and produces a structured answer.
-Name clearance and public release remain pending.
+The [ProxyType-4B adapter](https://huggingface.co/rvcarung/ProxyType-4B) is public on Hugging Face.
+The [ProxyType-9B adapter](https://huggingface.co/rvcarung/ProxyType-9B) has a separate model card in its Hugging Face repository.
 
 ## Model details
 
@@ -115,7 +116,7 @@ The retained BF16 GGUF contains merged weights and tokenizer information.
 The supported input renderer also uses the retained tokenizer files.
 
 Complete the [preparation guide](docs/preparation.md) before the user starts GPU work.
-Portable adapter and GGUF loading tests remain pending until the user runs the bounded acceptance commands.
+Loading in other environments remains untested.
 Keep the last working model originals until both formats pass.
 The [inference guide](docs/inference.md) describes the loading paths and conversion requirements.
 
@@ -124,7 +125,10 @@ The [inference guide](docs/inference.md) describes the loading paths and convers
 The repository code uses the [Apache License 2.0](LICENSE).
 Research use describes the model's intended purpose, not an additional restriction on that code license.
 The pinned Qwen base model also uses [Apache 2.0](https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/LICENSE).
-The accepted dataset and trained weights remain private.
+Download the adapters from [ProxyType-4B](https://huggingface.co/rvcarung/ProxyType-4B) or [ProxyType-9B](https://huggingface.co/rvcarung/ProxyType-9B) on Hugging Face.
+Each repository includes the adapter weights, configuration, tokenizer files, exact system prompt, notices, model metadata, and model card.
+The accepted dataset and merged GGUF files remain private.
+Adapter license terms remain unselected, as stated in the Hugging Face model cards.
 This card does not assign blanket license terms to source filings, labels, or model weights.
 
 The [release guide](docs/release.md) covers model license terms, attribution, privacy review, and approval of the exact upload list.

@@ -1,9 +1,6 @@
 # Release procedure
 
 Cleanup does not authorize public release.
-The intended publication is noncommercial, from Canada, through GitHub, with a later adapter release on Hugging Face.
-Keep the existing private history unchanged.
-A separate public repository with a reviewed initial commit is the proposed default.
 
 ## Public content and identity
 

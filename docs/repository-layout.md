@@ -40,7 +40,6 @@ The optional 9B base stays under `artifacts/models/Qwen3.5-9B/`.
 [base-model-9b.json](../configs/base-model-9b.json) binds its exact revision, checkpoint files, and local model metadata.
 The training `--model` parameter selects one supported pinned base without changing the default 4B recipe.
 Data and model contents stay ignored, with their usage guides as tracked exceptions.
-Private Git history stays unchanged during cleanup.
 
 ## Future runs
 

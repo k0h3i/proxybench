@@ -1,6 +1,5 @@
 # Security policy
 
-This project has no approved public release yet.
 Linux and WSL are the supported platforms.
 The CPU package uses the Python standard library.
 Optional training and inference dependencies have separate version records under `configs/`.
@@ -33,7 +32,6 @@ Do not add a personal email address to this document.
 
 Gitleaks 8.30.1 found no findings in the cleaned tracked-file candidate and all reachable local Git history on 2026-09-25.
 This scan does not prove the absence of secrets or inspect remote-only history, hosted assets, or every secret format.
-Private history still contains personal commit metadata and must not become public without review.
 Repeat the scanner and private-identifier inspection on the exact approved release under [docs/release.md](docs/release.md).
 
 Review Python dependencies before a code release and native libraries before a supported model-runtime release.
