@@ -43,11 +43,19 @@ Data and model contents stay ignored, with their usage guides as tracked excepti
 
 ## Future runs
 
-Create each run in a user-selected workspace outside `artifacts/`.
+Create each run in a separate workspace outside the repository.
 A run contains only the folders required by its operations.
 `run.json` records identities, effective configuration, and progress.
+
 Training creates `adapter/` and `checkpoints/`.
-Conversion uses `exports/`, and evaluation uses `evaluation/answers.jsonl`, optional `review/`, and `report.json`.
+The `export` command saves the GGUF as `conversion/model-bf16.gguf`.
+Evaluation of a training run saves its exported GGUF as `exports/conversion/model-bf16.gguf`.
+
+Evaluation saves answers in `evaluation/answers.jsonl` and its report in `evaluation/report.json`.
+Optional review files use `evaluation/review/`.
+
+If generation returns an answer, inference saves it in `answer.json`.
+Inference stores its captures and logs under `capture/`.
 
 Keep raw outputs until their intended review is complete.
 A completed future run does not delete itself.

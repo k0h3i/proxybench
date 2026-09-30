@@ -4,7 +4,7 @@ Use this guide before training, model evaluation, conversion, or inference.
 Run the commands in Bash from the repository root.
 A virtual environment keeps project Python packages separate.
 Preparation installs dependencies and tests them without loading a model onto the GPU.
-The user starts GPU work after preparation passes.
+Complete preparation before starting GPU work.
 
 ## Required software and inputs
 
@@ -12,12 +12,14 @@ The model environment uses Python 3.12.14 on x64 Linux or WSL2.
 The hardware target is an NVIDIA RTX 3090 with 24 GB of GPU memory.
 The commands below use Ubuntu 22.04, 24.04, or 26.04.
 Other platforms need a separately tested installation procedure.
+Python headers let the compiler build Python extensions.
 
 | Component | Required for | Installation or input |
 |---|---|---|
 | Git, curl, CA certificates | Repository and dependency downloads | Ubuntu packages below |
 | Python 3.12.14 and pip | All model commands | uv installation below, then root `.venv/` |
-| C/C++ compiler and development headers | Python GPU compilation | Ubuntu `build-essential` |
+| C/C++ compiler | Python GPU compilation | Ubuntu `build-essential` |
+| Python 3.12 development headers | Building Python extensions | Matching Python installation, checked below |
 | NVIDIA driver | All GPU commands | Linux or WSL driver instructions below |
 | Python model packages, including Torch and CUDA 13 libraries | Training, adapter loading, conversion, and the shared model environment | [requirements-training.txt](../configs/requirements-training.txt) |
 | llama.cpp executable and native libraries | GGUF inference, evaluation, and both-format acceptance | Pinned release installation below |
@@ -25,7 +27,7 @@ Other platforms need a separately tested installation procedure.
 | OpenMP, OpenSSL, and C++ runtime libraries | Native llama.cpp loading | Ubuntu `libgomp1`, `libssl-dev`, and `build-essential` |
 | Pinned base weights | Training, adapter loading, and export | Hugging Face download below |
 | Pinned converter source | Export and evaluation of a new adapter | Authenticated source archive below |
-| Selected adapter, tokenizer, and GGUF | Existing ProxyType-4B loading and inference | Public adapter repositories below; private retained GGUF |
+| Selected adapter, tokenizer, and GGUF | Existing model loading and inference | Public adapter repositories below; private retained GGUF |
 | Accepted dataset and original sources | Training, evaluation, and source reconstruction | Private retained data or the [dataset workflow](dataset.md) |
 
 Python packages do not install the NVIDIA driver or the llama.cpp executable.
@@ -33,7 +35,8 @@ The Torch packages supply CUDA 13 libraries for Python.
 The separate CUDA 12 installation supplies libraries for llama.cpp.
 
 Reserve space for Python packages, downloads, the retained base, and model files.
-The full base checkpoint occupies about 8.7 GiB, and the final GGUF occupies about 7.9 GiB.
+The full Qwen3.5-4B checkpoint occupies about 8.7 GiB.
+The ProxyType-4B GGUF occupies about 7.9 GiB.
 Training and conversion also require at least 64 GiB free on the run filesystem.
 The resource limits can reject work when available host or GPU memory is too low.
 
@@ -111,13 +114,42 @@ sh /tmp/proxybench-uv-install.sh
 "$HOME/.local/bin/uv" python install 3.12.14
 ```
 
+If uv installed Python, find its executable:
+
+```bash
+PROXYBENCH_PYTHON="$("$HOME/.local/bin/uv" python find --managed-python 3.12.14)"
+```
+
+If you supplied Python 3.12.14 another way, set its absolute executable path instead.
+Replace the example path below with that executable:
+
+```bash
+PROXYBENCH_PYTHON=/absolute/path/to/python3.12
+```
+
+Both paths require `venv`, `ensurepip`, and matching Python development headers.
+Make sure that the interpreter supplies them before creating `.venv/`:
+
+```bash
+"$PROXYBENCH_PYTHON" - <<'PY'
+import ensurepip
+from pathlib import Path
+import sys
+import sysconfig
+import venv
+assert sys.version_info[:3] == (3, 12, 14), 'Python 3.12.14 is required'
+header = Path(sysconfig.get_path('include')) / 'Python.h'
+assert header.is_file(), 'Install development headers for this Python interpreter'
+print('Interpreter and Python headers are ready')
+PY
+```
+
 Create `.venv/` with that interpreter using the standard `venv` module.
 If `.venv/` already exists, inspect its Python version and ownership before changing it.
 Use an interpreter outside disposable experiment directories.
 The [uv Python guide](https://docs.astral.sh/uv/guides/install-python/) describes managed interpreter installation.
 
 ```bash
-PROXYBENCH_PYTHON="$("$HOME/.local/bin/uv" python find --managed-python 3.12.14)"
 "$PROXYBENCH_PYTHON" -m venv .venv
 .venv/bin/python --version
 .venv/bin/python -m pip install -r configs/requirements-training-build.txt
@@ -130,7 +162,6 @@ CUDA_VISIBLE_DEVICES='' CUDA_HOME="$PWD/.venv/cuda-build/nvidia/cu13" \
 .venv/bin/python -m pip check
 ```
 
-If you supplied Python 3.12.14 another way, replace the first command with its absolute executable path.
 Keep the recorded package versions.
 Resolve a failed installation before continuing to model work.
 
@@ -157,13 +188,21 @@ Its build metadata records source revision `329b6160f513915f1c607dbfae3d5ce864a6
 The commands test the archive checksum before extraction.
 A checksum identifies the exact downloaded bytes.
 
-Choose an empty runtime destination for installation.
+For a new installation, choose a runtime destination that does not exist.
 The versioned directory below is the default.
-If that directory already exists, inspect its manifest before deciding whether to reuse it or choose another destination.
 
 ```bash
 export PROXYBENCH_RUNTIME="$HOME/.local/share/proxybench/runtime/llama-329b6160"
 export PROXYBENCH_CUDA_LIB="$PROXYBENCH_RUNTIME"
+```
+
+If reusing an existing installation, skip the download and installation commands in this section.
+For an existing installation, continue with [path setup and model inputs](#set-paths-and-obtain-model-inputs).
+The [CPU acceptance step](#complete-cpu-acceptance) checks the existing manifest and libraries.
+
+For a new installation, download the pinned files:
+
+```bash
 export PROXYBENCH_SETUP_DIR="$(mktemp -d -t proxybench-setup-XXXXXXXX)"
 export PROXYBENCH_LLAMA_ASSET=app-b10909-mix-bea84f7-linux-x64-cuda12-older.tar.gz
 curl -fL --retry 3 \
@@ -241,9 +280,10 @@ export PROXYBENCH_CONVERTER_SOURCE="$HOME/.local/share/proxybench/converter/llam
 ```
 
 If you chose another runtime directory, use that path here.
-Keep one pinned BF16 base under `artifacts/models/Qwen3.5-4B/`.
+Keep one pinned BF16 base for each selected model.
+The 4B base belongs under `artifacts/models/Qwen3.5-4B/`.
 Adapter loading and base-model comparisons share this copy.
-Download and inspect the pinned revision without loading it:
+For ProxyType-4B, download and inspect the pinned base revision without loading it:
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -258,7 +298,35 @@ print(base_snapshot(load_config('configs/training.json')))
 PY
 ```
 
-The loader authenticates [base-model.json](../configs/base-model.json) and compares every required local file with its pinned hash.
+For ProxyType-9B, download its pinned base revision instead:
+
+```bash
+.venv/bin/python - <<'PY'
+from huggingface_hub import snapshot_download
+print(snapshot_download(repo_id='Qwen/Qwen3.5-9B',
+                        revision='c202236235762e1c871ad0ccb60c8ee5ba337b9a',
+                        local_dir='artifacts/models/Qwen3.5-9B'))
+PY
+```
+
+The [9B base manifest](../configs/base-model-9b.json) also requires the pinned local `model-info.json`.
+Obtain that exact file from the project's authorized private copy.
+Place it at `artifacts/models/Qwen3.5-9B/model-info.json` before inspecting the snapshot.
+This file describes the base model and is separate from the ProxyType-9B model metadata below.
+
+Authenticate the complete 9B snapshot without loading it:
+
+```bash
+.venv/bin/python - <<'PY'
+from proxybench.extraction.runtime import load_config
+from proxybench.training.runtime import select_base
+configuration = select_base(load_config('configs/training.json'), 'artifacts/models/Qwen3.5-9B')
+print(configuration['model_id'], configuration['model_revision'])
+PY
+```
+
+The loader authenticates [base-model.json](../configs/base-model.json) for 4B or [base-model-9b.json](../configs/base-model-9b.json) for 9B.
+It compares every required local file with its pinned hash.
 Model execution uses the retained files without a separate download cache.
 The original checkpoint contains BF16 weights and a small set of FP32 parameters.
 Keep those original dtypes unchanged.
@@ -266,13 +334,18 @@ Keep those original dtypes unchanged.
 A Git clone contains no model weights or accepted labels.
 Download the adapter and tokenizer files from [ProxyType-4B](https://huggingface.co/rvcarung/ProxyType-4B) or [ProxyType-9B](https://huggingface.co/rvcarung/ProxyType-9B).
 Obtain the retained GGUF, local model metadata, sources, and accepted labels from the project's authorized private copy.
-Place them at these paths:
+Place model files at the matching destinations:
+
+| Input | ProxyType-4B | ProxyType-9B |
+|---|---|---|
+| Adapter weights, configuration, and tokenizer files | `artifacts/models/ProxyType-4B/adapter/` | `artifacts/models/ProxyType-9B/adapter/` |
+| Final inference model | `artifacts/models/ProxyType-4B/model-bf16.gguf` | `artifacts/models/ProxyType-9B/model-bf16.gguf` |
+| Model metadata | `artifacts/models/ProxyType-4B/model-info.json` | `artifacts/models/ProxyType-9B/model-info.json` |
+
+Place shared data at these paths:
 
 | Input | Destination |
 |---|---|
-| Adapter weights, configuration, and tokenizer files | `artifacts/models/ProxyType-4B/adapter/` |
-| Final inference model | `artifacts/models/ProxyType-4B/model-bf16.gguf` |
-| Model metadata | `artifacts/models/ProxyType-4B/model-info.json` |
 | Training and development messages with their manifest | `data/training-dataset/` |
 | Complete original sources | `data/raw/` |
 | Source identities and locations | `data/source-manifest.json` |
@@ -284,12 +357,17 @@ The adapters are public, while the merged GGUF files and accepted labels remain 
 
 ## Obtain converter source for export
 
+If you only use an existing GGUF or run model loading tests, skip this section.
 Conversion requires the exact source shipped with the pinned native release.
 The release provides a [source archive](https://github.com/unslothai/llama.cpp/releases/download/b10909-mix-bea84f7/llama.cpp-source-commit-329b6160f513915f1c607dbfae3d5ce864a64a4f.tar.gz).
 Its SHA-256 is `9d46c7ce4da17fa584df7d906209ff79f2b827a97b9fe57cd9652b29c55a6ca5`.
 The archive has no Git metadata, and upstream Git lookup does not resolve this revision.
 
-Download and extract the source into an empty directory:
+For a new installation, choose a converter destination that does not exist.
+If reusing an existing installation, skip the download and extraction commands.
+For an existing installation, run the source identity and converter help test below.
+
+For a new installation, download and extract the source:
 
 ```bash
 export PROXYBENCH_SOURCE_SETUP_DIR="$(mktemp -d -t proxybench-source-XXXXXXXX)"
@@ -320,7 +398,6 @@ It compares every extracted file and directory with the authenticated archive.
 It rejects changed, missing, and added files, symbolic links, and converter imports from other locations.
 Keep the archive inside the source installation.
 The converter disables Python bytecode files to preserve the exact inventory.
-Existing GGUF inference and the adapter/GGUF load test do not use converter source.
 
 Test the source identity and converter help with CUDA disabled:
 
@@ -366,16 +443,27 @@ for path in [root / 'llama-server', *sorted(root.glob('*.so*'))]:
 print('Native libraries resolve')
 PY
 .venv/bin/python -m pip check
-CUDA_VISIBLE_DEVICES='' .venv/bin/python -m unittest discover -s tests -v
 .venv/bin/python -m proxybench --help
 ```
 
+Run the complete CPU suite and replay its saved report with the [CPU test procedure](../tests/README.md).
+Keep the artifact directory that it creates.
 Require the complete CPU suite to pass without missing-dependency skips.
 Make sure that the declared inputs exist before preparing their model command.
 Record the interpreter, package versions, runtime manifest, base revision, and CPU results.
 Installation failures leave preparation incomplete.
 
-After acceptance, remove the temporary directories recorded in `PROXYBENCH_SETUP_DIR` and `PROXYBENCH_SOURCE_SETUP_DIR`.
-After preparation passes, use the [bounded load command](training.md#bounded-user-launched-load-command).
-The user launches that GPU command.
+After acceptance, remove any temporary directories created during installation.
+Use the paths recorded in `PROXYBENCH_SETUP_DIR` and `PROXYBENCH_SOURCE_SETUP_DIR`.
+
+After CPU acceptance passes, run the loading test for your model.
+Use a new run folder for each loading test.
+For ProxyType-4B, use the [bounded load command](training.md#bounded-model-loading-test).
+For ProxyType-9B, prepare `configs/inference-9b.json` with the matching GGUF and tokenizer paths from the [inference guide](inference.md#external-runtime).
+Then run:
+
+```bash
+.venv/bin/python -m proxybench validate-runtime --model artifacts/models/Qwen3.5-9B --adapter artifacts/models/ProxyType-9B/adapter --config configs/inference-9b.json --run-dir ../proxybench-runs/model-load-9b-001
+```
+
 Publication requires separate approval and the [security review](../SECURITY.md#reporting-and-release-review).

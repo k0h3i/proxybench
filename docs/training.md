@@ -6,16 +6,15 @@ Training also supports the pinned `Qwen/Qwen3.5-9B` checkpoint, revision `c20223
 Complete the [preparation guide](preparation.md) before model execution.
 It covers Python packages, the compiler, llama.cpp, native libraries, base weights, and private inputs.
 Export and evaluation of a new adapter also require the authenticated converter installation in the [preparation guide](preparation.md#obtain-converter-source-for-export).
-The user starts GPU commands.
 
 ## Recipe and inputs
 
-The retained final model completed 660 updates over two epochs.
+Both retained adapters, ProxyType-4B and ProxyType-9B, completed 660 updates over two epochs.
 The recipe uses batch size 1, accumulation 1, learning rate 0.0001, zero weight decay, and gradient clipping at 1.0.
 LoRA trains small weight changes while the base model stays fixed.
 Its rank is 8, alpha is 16, and dropout is zero.
 
-Each training example contains system, user, and assistant messages.
+Each training example contains `system`, `user`, and `assistant` messages.
 The system message must match [model-system-prompt.txt](../configs/model-system-prompt.txt) byte for byte.
 Sequence preparation masks the prompt so loss applies to the assistant response.
 The total context limit is 5,120 tokens, with 3,328 input tokens and 1,792 response tokens.
@@ -24,15 +23,19 @@ Reject an oversized example rather than silently truncating accepted context or 
 
 ## Run ownership and resume
 
-Use one new external folder for each run.
+Use one new folder outside the repository for each run.
 The commands reject existing destinations and mismatched input identities.
 One writer owns each run folder.
 The run metadata records input identities, effective configuration, progress, and cumulative resource usage.
 
 ```bash
 .venv/bin/python -m proxybench train --config configs/training.json --run-dir ../proxybench-runs/run-001
+```
+
+Inspect the run status with:
+
+```bash
 .venv/bin/python -m proxybench status --run-dir ../proxybench-runs/run-001
-.venv/bin/python -m proxybench resume --run-dir ../proxybench-runs/run-001
 ```
 
 Use `--model` to select a local base directory:
@@ -60,6 +63,12 @@ An explicit resume continues validated saved work and preserves resource totals.
 Deleting completed historical optimizer state intentionally gives up resuming that old run.
 
 Resume requires the exact checkpoint named by a `CLEAN_STOP` journal.
+If the journal records `CLEAN_STOP`, resume the validated checkpoint:
+
+```bash
+.venv/bin/python -m proxybench resume --run-dir ../proxybench-runs/run-001
+```
+
 The command rejects invalid journal metadata and changed input identities before it starts a worker.
 The bounded worker authenticates checkpoint files and reads trusted state on the CPU before it loads the GPU model.
 Existing `training-inputs.json` bytes stay unchanged during resume and rejected fresh training.
@@ -106,10 +115,11 @@ The display reports success only after publication, the worker result, and the w
 
 ## Selected-model evaluation
 
-Evaluation scores one selected model against development references.
+Evaluation scores one selected model against development or test references.
 It does not train a model.
 Use the trained run metadata or give an existing model and dataset explicitly.
 When a trained adapter needs conversion, evaluation uses the shared export path.
+It saves that run's GGUF as `exports/conversion/model-bf16.gguf`.
 Evaluation loads the merged GGUF once for the remaining examples in each attempt.
 Each example uses a separate request with prompt reuse disabled.
 The worker saves raw answers before it starts the next example.
@@ -121,9 +131,58 @@ Failures show a short error excerpt and the worker and server log paths.
 The command ends with a short status summary and report path.
 Use `--json` to print the complete report as JSON, with progress sent to standard error.
 
+Do not start evaluation of a training run until training finishes.
+Copy `configs/inference.json` into that run folder as `evaluation-config.json`.
+Set `tokenizer` in the copy to the path of that run's `adapter/` folder.
+For `run-001`, use `../proxybench-runs/run-001/adapter`.
+For `qwen-9b-train-001`, use `../proxybench-runs/qwen-9b-train-001/adapter`.
+These paths are relative to the repository root.
+
+The command replaces the configured model path with the run's exported GGUF.
+It keeps the configured tokenizer path.
+This lets each new adapter use its own tokenizer files.
+
+For a completed 4B training run, use:
+
 ```bash
-.venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/run-001 --config configs/inference.json
+.venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/run-001 --config ../proxybench-runs/run-001/evaluation-config.json
+```
+
+For a completed 9B training run, use its configuration:
+
+```bash
+.venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/qwen-9b-train-001 --config ../proxybench-runs/qwen-9b-train-001/evaluation-config.json
+```
+
+Evaluation changes the saved run operation from training to evaluation.
+After this change, `resume` continues evaluation.
+
+To evaluate an existing 4B GGUF against development references, use a new run folder:
+
+```bash
 .venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/evaluation-001 --model artifacts/models/ProxyType-4B/model-bf16.gguf --dataset data/training-dataset --config configs/inference.json
+```
+
+To evaluate it against test references, use the [protected test dataset](dataset.md#protected-test-workflow):
+
+```bash
+.venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/test-evaluation-001 --model artifacts/models/ProxyType-4B/model-bf16.gguf --dataset data/testing-dataset --config configs/inference.json
+```
+
+For an existing 9B GGUF, prepare the [matching inference configuration](inference.md#external-runtime).
+Set both its model and tokenizer paths before evaluation.
+
+```bash
+.venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/evaluation-9b-001 --model artifacts/models/ProxyType-9B/model-bf16.gguf --dataset data/training-dataset --config configs/inference-9b.json
+```
+
+Use `--dataset data/testing-dataset` and a new run folder for test evaluation of that model.
+Keep test references separate from training and development examples.
+Never use test answers or scores to select prompts or thresholds.
+
+To regenerate a report from saved answers, use:
+
+```bash
 .venv/bin/python -m proxybench evaluate --run-dir ../proxybench-runs/evaluation-001 --report-only
 ```
 
@@ -144,9 +203,9 @@ Loading and cleanup count once toward the cumulative allowance.
 If a request fails, evaluation saves that failure and stops the session.
 Unattempted examples remain incomplete.
 Use `resume` to process the remaining examples after the failure cause is resolved.
-A user stop leaves unfinished requests eligible for resume.
+Stopping evaluation leaves unfinished requests eligible for resume.
 Resume recovers completed captures before it requires model files.
-Actual GPU speed improvement and answer comparisons remain pending user-launched validation.
+The [benchmarking guide](benchmarking.md#reviewed-results) records reviewed model comparisons.
 
 When semantic scoring needs review, the command returns pending status and prints the review location.
 Review the exact source cells, reference labels, and new answer in the browser.
@@ -168,10 +227,9 @@ Regeneration does not promise identical historical answers or scores.
 Prepare bounded model-load tests before deleting the last working originals.
 Test the portable adapter with its pinned base and the GGUF without the old base directory.
 Use synthetic text and HTML fragments with old run folders and artifact environments unavailable.
-The user must launch these GPU tests.
 Until they pass, model migration remains pending.
 
-Keep future run output outside `artifacts/`.
+Keep future run output outside the repository.
 Promote only an explicitly selected final model into `artifacts/models/`, with overwrite protection.
 Keep the adapter, final GGUF, required tokenizer files, and portable model metadata.
 Model publication requires separate approval under the [model card](../MODEL_CARD.md#model-publication).
@@ -179,14 +237,13 @@ Model publication requires separate approval under the [model card](../MODEL_CAR
 ## Preparation stage before GPU work
 
 Follow the [preparation guide](preparation.md) for installation and CPU acceptance.
-The implementing agent completes those steps before handing over a GPU command.
+Complete these steps before running GPU commands.
 Environment preparation does not change the source-labeling purpose of `.venv/bin/python -m proxybench prepare`.
 
-## Bounded user-launched load command
+## Bounded model loading test
 
 Run this command only after preparation passes.
 Use a new run folder and the prepared runtime and retained model locations.
-The user starts this GPU work.
 
 ```bash
 export PROXYBENCH_RUNTIME="$HOME/.local/share/proxybench/runtime/llama-329b6160"
@@ -202,15 +259,23 @@ Before the test, make old run directories and artifact environments unavailable 
 Use `.venv/`, the independent native runtime, and the retained base in `artifacts/models/Qwen3.5-4B/`.
 If either load fails, keep the protected originals and fix the supported path.
 
-For future export, first complete the [converter preparation](preparation.md#obtain-converter-source-for-export).
-Then run export with the prepared variables:
+## Export and promote a model
+
+Complete the [converter preparation](preparation.md#obtain-converter-source-for-export) before export.
+The `export` command converts an existing adapter in a new run folder.
+With the prepared runtime variables, run:
 
 ```bash
 .venv/bin/python -m proxybench export --adapter artifacts/models/ProxyType-4B/adapter --config configs/training.json --run-dir ../proxybench-runs/export-001
 ```
 
 The converter uses the same Python environment and its bundled GGUF code.
-After selecting a future trained run with a completed export, promote its retained formats explicitly:
+This example saves `conversion/model-bf16.gguf` inside `export-001`.
+
+To promote a newly trained adapter, first [evaluate its training run](#selected-model-evaluation).
+Evaluation creates `exports/conversion/model-bf16.gguf` inside that run.
+Promotion requires the adapter and this export from the same training run.
+After selecting the completed model, promote it from that run:
 
 ```bash
 .venv/bin/python -m proxybench promote --run-dir ../proxybench-runs/run-001 --name NewModelName-4B
