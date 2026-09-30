@@ -6,9 +6,9 @@
 [![CPU Python: 3.11+](https://img.shields.io/badge/CPU_Python-3.11%2B-blue.svg)](pyproject.toml)
 [![Model Python: 3.12.14](https://img.shields.io/badge/Model_Python-3.12.14-blue.svg)](docs/preparation.md#required-software-and-inputs)
 
-ProxyBench extracts structured proxy-voting records from historical SEC Form N-PX text and HTML.
+ProxyBench is a family of fine-tuned models built to extract structured proxy-voting records from historical SEC Form N-PX text and HTML.
+The family includes ProxyType-4B and ProxyType-9B.
 Each input contains one manually marked voting target and its surrounding source context.
-ProxyType-4B is the working name for the project's trained Qwen3.5-4B model.
 
 The repository provides tools for the following tasks:
 

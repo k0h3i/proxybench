@@ -69,10 +69,7 @@ A token is a unit of text processed by the model.
 The recipe allows 5,120 tokens in total, with 3,328 for input and 1,792 for the response.
 Preparation rejects oversized examples without silently truncating their source context or answers.
 The [training configuration](configs/training.json) and [training guide](docs/training.md) provide the full recipe and procedures.
-
 The [exact system prompt](configs/model-system-prompt.txt) defines the model instruction.
-A SHA-256 hash identifies its exact file bytes.
-Its hash is `fb828305c494f90092180ae4e0dea4290b00f7f90fbb47ec34f8dff1810f3a93`.
 
 ## Evaluation and uncertainty
 

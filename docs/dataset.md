@@ -1,15 +1,13 @@
 # Sources and accepted labels
 
-The retained dataset contains 330 training examples and 90 development examples from 36 source files.
+The retained dataset contains 330 training examples and 90 validation examples from 36 source files.
 Keep its existing split and row order.
-The development examples contain known exposure and do not form an untouched test set.
-The manifest also retains nine unselected exposed source identities among 45 source assignments.
-Future preparation rejects training assignments that conflict with these restrictions.
+The validation examples form the development set and contain known project exposure.
 
 ## Acquisition and source storage
 
 Keep complete source files in the flat `data/raw/` directory.
-The source manifest records original locations, friendly filenames, accession identities, encodings, and hashes where known.
+The source manifest records original locations, local filenames, and SEC filing identities.
 Keep amendments and attachments separate.
 Deduplicate identical bytes only when every original source location remains recorded.
 Do not retain incomplete downloads or SEC error pages.
@@ -34,7 +32,7 @@ That filename must use only letters, numbers, periods, or hyphens.
 
 ### Download the original bytes
 
-Run the commands in Bash from the repository root.
+Run the commands in Bash on Linux or WSL2 from the repository root.
 Source preparation requires Python 3.11 or later and no model dependencies.
 If `.venv/` is missing, create it with `python3 -m venv .venv`.
 Install the CPU package:
@@ -149,7 +147,7 @@ Rejected and unreviewed labels cannot enter the dataset.
 `data/training-dataset/` contains the following files:
 
 - `training-examples.jsonl`: The ordered training messages.
-- `development-examples.jsonl`: The ordered development messages.
+- `development-examples.jsonl`: The ordered validation messages.
 - `dataset-manifest.json`: Source selections, file hashes, split assignments, and label rules.
 
 JSONL stores one JSON object on each line.
@@ -160,6 +158,5 @@ It needs no parent dataset or experiment output.
 
 The reader rebuilds each user message from its source selection and compares it with the saved message.
 It also checks source hashes, prompt bytes, row hashes, order, duplicate targets, labels, and exposure restrictions.
-Assistant labels remain unchanged during path migration.
 Without separate authorization for an exact release list, keep local source copies and label files out of Git.
 See the [release guide](release.md) for raw-source review.
