@@ -306,7 +306,7 @@ The model does not provide investment advice.
 Read the [model card](MODEL_CARD.md) for the model's intended use and remaining limits.
 
 Code, source filings, accepted labels, and model weights have separate rights and release decisions.
-The [data notice](DATA_NOTICE.md) records SEC source attribution and archive review requirements.
+The [data notice](DATA_NOTICE.md) records SEC source attribution and redistribution guidance.
 The [release guide](docs/release.md) covers the required review and approval before publication.
 The [security policy](SECURITY.md) explains how to handle untrusted filings and report sensitive material.
 
