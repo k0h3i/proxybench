@@ -1,8 +1,8 @@
 # Retained models
 
-Keep selected final models and the pinned base under `models/`.
-The working model folder is `models/ProxyType-4B/`.
-It contains the adapter, final inference GGUF, and portable `model-info.json`.
+Keep selected final models and pinned bases under `models/`.
+Retained trained models use `models/ProxyType-4B/` and `models/ProxyType-9B/`.
+Each folder contains the adapter, final inference GGUF, and portable `model-info.json`.
 A selected model can also retain `evaluation/report.json` and `evaluation/agent-review-audit.json`.
 These files record the reviewed results for that exact model.
 
@@ -12,6 +12,9 @@ The loader compares its files with [base-model.json](../configs/base-model.json)
 Keep the base comparison GGUF at `models/Qwen3.5-4B/model-bf16.gguf`.
 This converted file is separate from the pinned checkpoint inventory.
 Evaluation records its own file hash.
+
+The pinned 9B checkpoint stays under `models/Qwen3.5-9B/`.
+The loader compares its files with [base-model-9b.json](../configs/base-model-9b.json) before use.
 Keep run history, environments, base caches, and merged conversion intermediates outside this folder.
 
 Use an external workspace for each future run.

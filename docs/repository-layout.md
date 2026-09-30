@@ -28,8 +28,8 @@ Its manifest retains the accepted review and audit evidence.
 Keep protected test identities in `data/test-source-ledger.json`.
 Their manifests preserve source identity, labels, and split restrictions.
 
-Keep selected models under `artifacts/models/ProxyType-4B/`.
-The folder contains `adapter/`, `model-bf16.gguf`, and `model-info.json`.
+Keep selected models under `artifacts/models/ProxyType-4B/` and `artifacts/models/ProxyType-9B/`.
+Each folder contains `adapter/`, `model-bf16.gguf`, and `model-info.json`.
 A selected model can also retain its reviewed report and audit under `evaluation/`.
 Keep the pinned BF16 base under `artifacts/models/Qwen3.5-4B/`.
 Adapter loading and base-model comparisons share that copy.
