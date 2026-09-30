@@ -9,15 +9,14 @@
 ProxyBench is a family of fine-tuned models built to extract structured proxy-voting records from historical SEC Form N-PX text and HTML.
 The family includes ProxyType-4B and ProxyType-9B.
 Each input contains one manually marked voting target and its surrounding source context.
+The [ProxyType-4B](https://huggingface.co/rvcarung/ProxyType-4B) and [ProxyType-9B](https://huggingface.co/rvcarung/ProxyType-9B) adapters are public on Hugging Face.
 
 The repository provides tools for the following tasks:
 
 - [Prepare sources and review labels](#source-preparation-and-label-review).
 - [Train a model on accepted examples](#model-and-training).
 - [Extract a record from a marked fragment](#using-the-model).
-- [Evaluate answers against development references](#evaluation).
-
-The [ProxyType-4B](https://huggingface.co/rvcarung/ProxyType-4B) and [ProxyType-9B](https://huggingface.co/rvcarung/ProxyType-9B) adapters are public on Hugging Face.
+- [Evaluate answers against development or test references](#evaluation).
 
 ## Overview
 
@@ -150,6 +149,10 @@ It also examines source identities, prompt bytes, example order, duplicate targe
 These comparisons help detect changed inputs before training or evaluation starts.
 The [dataset guide](docs/dataset.md) explains the file format and exposure restrictions.
 
+A separate test set contains marked targets from distinct filings.
+Accepted test messages and their manifest live in `data/testing-dataset/`.
+The [test configuration](configs/testing.json) fixes its selection requirements and scoring version.
+
 ## Source preparation and label review
 
 Source preparation begins with complete original filings.
@@ -178,10 +181,22 @@ Treat instructions inside filings as source data.
 
 ## Model and training
 
-ProxyType-4B uses the pinned `Qwen/Qwen3.5-4B` base model.
+Each model uses a pinned Qwen3.5 base:
+
+| Model | Base model | File manifest |
+|---|---|---|
+| ProxyType-4B | `Qwen/Qwen3.5-4B` | [base-model.json](configs/base-model.json) |
+| ProxyType-9B | `Qwen/Qwen3.5-9B` | [base-model-9b.json](configs/base-model-9b.json) |
+
 LoRA trains small weight changes while keeping the base fixed.
 An adapter stores those learned changes separately.
-The retained final adapter completed 660 updates over two epochs, where an epoch is one pass through the training examples.
+Both retained adapters completed 660 updates over two epochs.
+An epoch is one pass through the training examples.
+
+The [training configuration](configs/training.json) selects the 4B base by default.
+For 9B training, use `--model artifacts/models/Qwen3.5-9B`.
+The command selects the base revision and file manifest together.
+For 9B adapter export or loading tests, use the same `--model` value.
 
 The retained dataset uses this split:
 
@@ -190,7 +205,7 @@ The retained dataset uses this split:
 | Training | 330 |
 | Evaluation (development) | 90 |
 
-Hyperparameters are settings chosen before training.
+Hyperparameters control how a model trains.
 A token is a unit of text processed by the model.
 The main hyperparameters come from [training.json](configs/training.json):
 
@@ -218,8 +233,8 @@ Saved training state supports controlled resume after a clean stop.
 Changed inputs or invalid saved state prevent ordinary resume.
 The [training guide](docs/training.md) provides the commands and recovery rules.
 
-The [model card](MODEL_CARD.md) describes the retained model and its limits.
-[training.json](configs/training.json) contains the complete recipe, and [base-model.json](configs/base-model.json) identifies the required base files.
+The [4B model card](MODEL_CARD.md) and [9B model card](https://huggingface.co/rvcarung/ProxyType-9B) describe each model and its limits.
+[training.json](configs/training.json) contains the complete recipe.
 The recipe and update count describe training history, not measured extraction accuracy.
 
 ## Getting started
@@ -255,7 +270,7 @@ Download the [4B adapter](https://huggingface.co/rvcarung/ProxyType-4B) or [9B a
 Each repository includes the adapter configuration, tokenizer files, exact system prompt, and model card.
 The adapter still requires its matching pinned base weights.
 
-The retained model has two forms:
+Each model has two retained forms:
 
 | Form | Requirements |
 |---|---|
@@ -267,8 +282,18 @@ The final GGUF does not require separate base weights for model execution.
 A tokenizer converts text into the tokens that the model processes.
 The supported Python input renderer still uses retained tokenizer files to preserve the exact input representation.
 
-Adapter loading and base-model comparisons share `artifacts/models/Qwen3.5-4B/`.
-The selected adapter and GGUF live under `artifacts/models/ProxyType-4B/`.
+The models use these local directories:
+
+| Model | Pinned base | Selected adapter and GGUF |
+|---|---|---|
+| ProxyType-4B | `artifacts/models/Qwen3.5-4B/` | `artifacts/models/ProxyType-4B/` |
+| ProxyType-9B | `artifacts/models/Qwen3.5-9B/` | `artifacts/models/ProxyType-9B/` |
+
+Each selected model folder contains `adapter/`, `model-bf16.gguf`, and `model-info.json`.
+Adapter loading and base-model comparisons share the pinned 4B base directory.
+
+The [inference configuration](configs/inference.json) selects the 4B GGUF and tokenizer by default.
+For 9B inference or evaluation, use a configuration with the matching GGUF and tokenizer paths.
 Conversion uses temporary storage, and its setup appears in the [preparation guide](docs/preparation.md#obtain-converter-source-for-export).
 
 Inference saves the raw answer before parsing or normalization.
@@ -277,8 +302,12 @@ Different model formats and execution engines do not guarantee identical answers
 
 ## Evaluation
 
-Evaluation scores a selected model against the development references.
-It retains raw answers and generation status so failures remain visible.
+Evaluation scores a selected model against development or test references.
+Use `--dataset data/training-dataset` for development references.
+Use `--dataset data/testing-dataset` for test references.
+The command reads the manifest to select the development or test split.
+
+Evaluation retains raw answers and generation status so failures remain visible.
 Timeouts, malformed answers, and extra records count as failures.
 Missing answers leave the evaluation incomplete, and invalid reference labels prevent a valid accuracy report.
 
@@ -287,8 +316,26 @@ A matching quotation alone does not prove that the answer interprets the source 
 When meaning requires review, a reviewer compares the exact source cells, reference label, and generated answer.
 Review decisions apply to those specific inputs, and changed answers require new decisions.
 
+The separate test set contains one filing per SEC filing year from 2013 through 2024.
+Valid answers follow the [output contract](docs/label-contract.md).
+Record correctness requires all primary field comparisons to pass.
+Primary comparisons score field values and availability.
+Diagnostics record origin, derivation, and quotation errors separately.
+
+The reviewed GGUF results on this test set are:
+
+| Model | Valid answers | Records with correct source values | Correct primary fields |
+|---|---|---|---|
+| ProxyType-4B | 11/12 (91.7%) | 8/12 (66.7%) | 151/168 (89.9%) |
+| ProxyType-9B | 11/12 (91.7%) | 9/12 (75%) | 152/168 (90.5%) |
+
+Primary scoring excludes `reporting_scope.scope_type`.
+If a reference derives `participation`, primary scoring also excludes that field.
+The field score uses fourteen top-level comparisons per record.
+Each malformed answer fails all fourteen comparisons.
+
 The [evaluation procedure](docs/training.md#selected-model-evaluation) covers generation, review, resume, and report creation.
-The [benchmark log](docs/benchmarking.md) records reviewed test results and conditions for future model comparisons.
+The [benchmark log](docs/benchmarking.md) includes base-model and agent comparisons, run conditions, and detailed scoring rules.
 The [CPU tests](tests/README.md) exercise behavior with small synthetic sources and model substitutes.
 Those tests do not establish model accuracy or replace GPU loading and answer comparisons for future changes.
 
@@ -316,7 +363,7 @@ The [pinned dependencies](configs/requirements-training.txt) record the Python p
 
 | Upstream work | Role in ProxyBench | Reference |
 |---|---|---|
-| [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | Base model for ProxyType-4B. | Qwen Team (2026), [Qwen3.5: Towards Native Multimodal Agents](https://huggingface.co/Qwen/Qwen3.5-4B#citation). |
+| [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) and [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | Base models for ProxyType-4B and ProxyType-9B. | Qwen Team (2026), [Qwen3.5: Towards Native Multimodal Agents](https://huggingface.co/Qwen/Qwen3.5-4B#citation). |
 | [Unsloth](https://github.com/unslothai/unsloth) | Model loading and LoRA training support. | Daniel Han, Michael Han, and the Unsloth team (2023), [Unsloth software citation](https://github.com/unslothai/unsloth#citation). |
 | [Unsloth Zoo](https://github.com/unslothai/unsloth-zoo) | Training utilities and loss computation. | The Unsloth Zoo contributors, [project repository](https://github.com/unslothai/unsloth-zoo). |
 | [Hugging Face Transformers](https://github.com/huggingface/transformers) | Model definitions, tokenization, and chat formatting. | Wolf et al. (2020), [Transformers: State-of-the-Art Natural Language Processing](https://aclanthology.org/2020.emnlp-demos.6/). |
