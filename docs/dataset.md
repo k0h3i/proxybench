@@ -1,8 +1,10 @@
 # Sources and accepted labels
 
-The retained dataset contains 330 training examples and 90 validation examples from 36 source files.
-Keep its existing split and row order.
-The validation examples form the development set and contain known project exposure.
+Fine-tuning used 330 training examples for both ProxyType-4B and ProxyType-9B.
+Another 90 examples served as development references.
+Together, the training and development examples came from 36 source files.
+The development examples contain known project exposure.
+
 The acquisition and review steps below cover training and development examples.
 For test references, start with the [protected test workflow](#protected-test-workflow) before acquiring sources.
 

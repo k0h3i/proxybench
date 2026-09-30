@@ -1,11 +1,13 @@
-# Inference with ProxyType-4B
+# Inference with ProxyType models
 
 Inference means generating an answer from a model.
+This guide covers ProxyType-4B and ProxyType-9B.
+
 The supported task takes one marked voting target with its source context.
 Prepare the fragment through the [dataset workflow](dataset.md).
 The model returns the fourteen-field [label contract](label-contract.md).
 It does not select every target in a complete filing.
-Complete the [preparation guide](preparation.md) in the root `.venv/` before the user launches GPU work.
+Complete the [preparation guide](preparation.md) in the root `.venv/` before launching GPU work.
 
 ## Model formats
 
@@ -13,6 +15,7 @@ An adapter stores learned changes to the base weights.
 Merging applies those changes to a copy of the base weights.
 GGUF is the converted model format used by llama.cpp.
 These are separate steps with different storage and runtime requirements.
+A tokenizer converts text into tokens, the units a model processes.
 
 ```mermaid
 flowchart LR
@@ -24,6 +27,8 @@ flowchart LR
     C --> G[Final model-bf16.gguf]
     G --> L[Local llama.cpp inference]
 ```
+
+The file sizes below apply to ProxyType-4B.
 
 | Form | Required files and tradeoffs |
 |---|---|
@@ -39,7 +44,6 @@ Delete temporary merged weights after successful conversion.
 Merging removes separate adapter calculations.
 Changing to llama.cpp also changes the inference engine and its GPU implementation.
 Do not attribute every speed difference to merging or promise identical answers across formats.
-The project publishes no timing or accuracy claim from deleted experiment reports.
 
 ## External runtime
 
@@ -53,21 +57,51 @@ The pinned engine revision is `329b6160f513915f1c607dbfae3d5ce864a64a4f`, releas
 A replacement build requires bounded loading and inference tests.
 Keep installed environments and retained models outside run folders.
 
+The default configuration selects ProxyType-4B.
+For ProxyType-9B, copy `configs/inference.json` to `configs/inference-9b.json`.
+Set `model` to `artifacts/models/ProxyType-9B/model-bf16.gguf` in the copy.
+Set `tokenizer` to `artifacts/models/ProxyType-9B/adapter` in the copy.
+Pass that copy with `--config` when running inference.
+The `--model` option changes only the model path.
+
 ## Inputs and answers
 
 Use the exact [system prompt](../configs/model-system-prompt.txt).
-Save source context as UTF-8 text in `fragment.txt`, with one `BEGIN MARKED TARGET` and `END MARKED TARGET` pair.
+The dataset workflow saves prepared packets in `packet-set.json`.
+Select one packet and save its `model_input` value as UTF-8 text in `fragment.txt`.
+Decode the JSON string before saving it.
+Keep exactly one `BEGIN MARKED TARGET` and `END MARKED TARGET` pair.
 The command places this context in the user message without repeating the label policy.
+
 Preserve the generation prefix, tokenizer template, response parameters, and token limits.
 The server must not substitute another chat template.
+Choose a run folder that does not exist yet.
+The command creates it and rejects an existing folder.
+
+For ProxyType-4B, run:
 
 ```bash
 .venv/bin/python -m proxybench infer --model artifacts/models/ProxyType-4B/model-bf16.gguf --input fragment.txt --config configs/inference.json --run-dir ../proxybench-runs/inference-001
 ```
 
+For ProxyType-9B, use the copied configuration with its matching model and tokenizer paths:
+
+```bash
+.venv/bin/python -m proxybench infer --model artifacts/models/ProxyType-9B/model-bf16.gguf --input fragment.txt --config configs/inference-9b.json --run-dir ../proxybench-runs/inference-9b-001
+```
+
 The command saves the raw answer before parsing or normalization.
+If generation returns an answer, read `answer.json` in the run folder.
+The `text` field contains the generated answer.
+The `status` field records how generation ended.
+A `true` value for `format_valid` requires complete generation and a valid answer structure.
+The `format_error` field records any parsing or structure error.
+
+A timeout or worker failure can prevent the command from saving `answer.json`.
+If this file is missing, inspect records and logs under `capture/` in the run folder.
 Keep failure details when generation times out or the answer violates the contract.
 Do not silently repair malformed answers or infer unsupported values.
+
 Inference binds its server to `127.0.0.1` and stops its owned process after work.
 Keep process, memory, and input limits enabled.
 
