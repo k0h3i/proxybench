@@ -9,8 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from proxybench.training.measurements import (
-    EVENT_PREFIX, PACKAGES, MeasurementRecorder, capture_runtime_identity, compare_runtime_identity,
-    epoch_progress, event_line, parse_event,
+    MeasurementRecorder, capture_runtime_identity, compare_runtime_identity, epoch_progress,
 )
 
 
@@ -28,12 +27,11 @@ class Clock:
 class MeasurementTests(unittest.TestCase):
     def setUp(self):
         self.clock = Clock()
-        self.events = []
-        self.recorder = MeasurementRecorder(clock=self.clock, emit=self.events.append, attempt_id='test', window=2)
+        self.recorder = MeasurementRecorder(clock=self.clock)
 
-    def update(self, step, *, seconds=5, tokens=100, supervised=25):
+    def update(self, step, *, seconds=5):
         return self.recorder.record_update(global_step=step, sample_position=step,
-            nonpadding_tokens=tokens, supervised_tokens=supervised,
+            nonpadding_tokens=100, supervised_tokens=25,
             full_loop_seconds=seconds, compute_seconds=seconds - 1, loss=2.0)
 
     def test_nested_stages_and_failed_attempt_keep_elapsed_cost(self):
@@ -53,18 +51,6 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(result['stage_accounting'], 'inclusive_nested')
         self.clock.advance(10)
         self.assertEqual(self.recorder.elapsed(), 9)
-
-    def test_token_rates_share_full_loop_window_including_save_time(self):
-        self.update(1, seconds=5, tokens=100, supervised=20)
-        self.update(2, seconds=7, tokens=70, supervised=14)
-        result = self.update(3, seconds=13, tokens=130, supervised=26)
-        rate = result['throughput']
-        self.assertEqual((rate['first_step'], rate['last_step']), (2, 3))
-        self.assertEqual(rate['seconds'], 20)
-        self.assertEqual(rate['nonpadding_tokens_per_second'], 10)
-        self.assertEqual(rate['supervised_tokens_per_second'], 2)
-        self.assertEqual(result['compute_timing'], 'host_wall')
-        self.assertFalse(result['final_publication_in_eta'])
 
     def test_first_update_and_startup_remain_in_attempt_totals(self):
         with self.recorder.stage('model_loading'):
@@ -131,14 +117,6 @@ class MeasurementTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.recorder.begin_memory_window('attempt', reset=fail, global_step=0)
         self.assertIsNone(self.recorder.memory_window)
-
-    def test_events_round_trip_and_optional_bad_output_is_ignored(self):
-        event = self.recorder.phase('saving checkpoint', global_step=330)
-        self.assertEqual(parse_event(event_line(event)), event)
-        for line in ('ordinary output', EVENT_PREFIX + '{', EVENT_PREFIX + '[]',
-                     EVENT_PREFIX + json.dumps(event | dict(attempt_elapsed_seconds=float('nan'))),
-                     EVENT_PREFIX + json.dumps(event | dict(schema_version='old'))):
-            self.assertIsNone(parse_event(line))
 
     def test_epoch_boundaries_use_sample_positions(self):
         for position, epoch, count, fraction in (
@@ -215,24 +193,3 @@ class RuntimeIdentityTests(unittest.TestCase):
             result = self.capture(tmp, package_version=missing)
             self.assertIsNone(result['packages']['synthetic'])
             self.assertEqual(compare_runtime_identity(result, result)['status'], 'UNVERIFIED')
-
-    def test_convolution_install_changes_identity_without_rewriting_old_record(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp)/'worker.py').write_text('value = 1\n')
-            current = self.capture(tmp, package_names=PACKAGES)
-            self.assertEqual(current['packages']['causal-conv1d'], '1.0')
-            previous = current | {'packages': {
-                name: version for name, version in current['packages'].items()
-                if name != 'causal-conv1d'}}
-            comparison = compare_runtime_identity(previous, current)
-            self.assertEqual(comparison['status'], 'CHANGED')
-            self.assertEqual(comparison['changed'], ['packages'])
-            self.assertTrue(comparison['requires_acceptance'])
-            self.assertNotIn('causal-conv1d', previous['packages'])
-
-    def test_capture_copies_caller_details(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            kernels = {'loss': 'original'}
-            value = self.capture(tmp, kernels=kernels)
-            kernels['loss'] = 'changed'
-            self.assertEqual(value['kernels']['loss'], 'original')

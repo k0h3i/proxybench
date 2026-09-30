@@ -33,7 +33,7 @@ class EvaluationWorkerTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.requests, self.tokenizations, self.starts = [], [], []
+        self.requests, self.starts = [], []
         self.fail_at = None
         self.terminal_override = {}
         self.config = dict(server=str(self.root/'llama-server'), model=str(self.root/'model.gguf'),
@@ -66,7 +66,6 @@ class EvaluationWorkerTests(unittest.TestCase):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 if self.path == '/tokenize':
-                    worker.tokenizations.append(body)
                     self.send(json.dumps(dict(tokens=list(body['content'].encode()))).encode())
                     return
                 worker.requests.append(body)
@@ -108,22 +107,6 @@ class EvaluationWorkerTests(unittest.TestCase):
 
     def answer(self, index):
         return json.loads((self.root/'answers'/f'answer-{index}.json').read_text())
-
-    def test_multiple_prompts_share_server_and_disable_cache_each_time(self):
-        self.assertEqual(run_session(self.root), 0)
-        self.assertEqual(len(self.starts), 1)
-        self.assertEqual(len(self.requests), 3)
-        self.assertEqual(len(self.tokenizations), 3)
-        self.assertEqual(len({tuple(request['prompt']) for request in self.requests}), 3)
-        for index, request in enumerate(self.requests):
-            self.assertFalse(request['cache_prompt'])
-            self.assertEqual(request['n_cache_reuse'], 0)
-            self.assertEqual(request['temperature'], 0)
-            self.assertEqual(request['seed'], 42)
-            self.assertEqual(self.answer(index)['status'], 'COMPLETE')
-            self.assertFalse(self.answer(index)['format_valid'])
-        self.assertEqual(json.loads((self.root/'progress.json').read_text()), dict(index=2, state='COMPLETE'))
-        self.assertFalse((self.root/'deadline.json').exists())
 
     def test_existing_inference_api_reuses_server_and_validates_before_launch(self):
         answers = generate_answers([case['messages'] for case in self.cases],

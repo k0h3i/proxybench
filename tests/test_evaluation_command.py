@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -71,7 +72,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         assert self.path == '/completion'
         event('completion', **request)
-        tokens = list((root / 'response.json').read_bytes()) + [9999]
+        response = b'not-json' if b'case 1' in bytes(request['prompt']) else (root / 'response.json').read_bytes()
+        tokens = list(response) + [9999]
         terminal = dict(tokens=tokens, stop=True, stop_type='eos', truncated=False,
                         tokens_evaluated=len(request['prompt']), tokens_predicted=len(tokens),
                         timings=dict(cache_n=0, prompt_n=len(request['prompt'])))
@@ -100,6 +102,8 @@ class EvaluationCommandTests(unittest.TestCase):
                 files={'llama-server': file_hash(server)})))
             reference = dict(fields={name: dict(value=None, raw_text=None,
                 availability='ABSENT_IN_CONTEXT', origin=None) for name in FIELDS})
+            reference['fields']['issuer_name'] = dict(value='A & B', raw_text='A & B',
+                availability='PRESENT', origin='EXTRACTED')
             (root/'response.json').write_text(json.dumps(reference))
             config = dict(server=str(server), model=str(root/'model.gguf'),
                 tokenizer=str(root/'tokenizer'), runtime_manifest=str(root/'manifest.json'),
@@ -110,8 +114,10 @@ class EvaluationCommandTests(unittest.TestCase):
                 natural_request_seconds=5, limits=dict(cpu_only=True, phase_seconds=10,
                     total_seconds=30, start_host_bytes=0, stop_host_bytes=0,
                     device_margin_bytes=0, heartbeat_seconds=15))
-            cases = [dict(id=str(index), reference=reference, source_cells=[],
-                messages=source_messages(f'BEGIN MARKED TARGET case {index} END MARKED TARGET', config))
+            source_cell = dict(block_index=0, cell_index=0, text='Issuer: A & B\n<script>bad()</script>')
+            cases = [dict(id=str(index), reference=reference, source_cells=[source_cell],
+                messages=source_messages(source_cell['text'] +
+                    f'\nBEGIN MARKED TARGET case {index} END MARKED TARGET', config))
                 for index in range(3)]
             inputs = dict(identity=dict(dataset='synthetic', model=file_hash(config['model']),
                 runtime=runtime_binding(config), prompt=binding([case['messages'][0] for case in cases])),
@@ -121,10 +127,10 @@ class EvaluationCommandTests(unittest.TestCase):
             source = Path(__file__).resolve().parents[1]/'src'
             environment = dict(os.environ, CUDA_VISIBLE_DEVICES='',
                                PYTHONPATH=os.pathsep.join((str(root), str(source))))
-            command = [sys.executable, '-m', 'proxybench', 'evaluate', '--run-dir', str(run)]
+            command = [sys.executable, '-m', 'proxybench']
 
-            def execute(*extra, expected_returncode=2):
-                result = subprocess.run([*command, *extra], cwd=root, env=environment,
+            def execute(*extra, expected_returncode=2, action='evaluate'):
+                result = subprocess.run([*command, action, '--run-dir', str(run), *extra], cwd=root, env=environment,
                                         capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, expected_returncode, result.stdout + result.stderr)
                 return result
@@ -175,14 +181,26 @@ class EvaluationCommandTests(unittest.TestCase):
             self.assertEqual(len({tuple(event['prompt']) for event in completions}), 3)
             self.assertTrue(all(event['cache_prompt'] is False and event['n_cache_reuse'] == 0
                                 for event in completions))
+            for event in completions:
+                self.assertEqual(event['temperature'], 0)
+                self.assertEqual(event['seed'], 42)
             answers = [json.loads(line) for line in (run/'evaluation/answers.jsonl').read_text().splitlines()]
             self.assertEqual([answer['id'] for answer in answers], ['0', '1', '2'])
             self.assertTrue(all(answer['answer']['status'] == 'COMPLETE' for answer in answers))
+            self.assertEqual([answer['answer']['format_valid'] for answer in answers], [True, False, True])
             self.assertEqual(len(list((run/'evaluation/results').glob('*.json'))), 3)
             state = json.loads((run/'run.json').read_text())
             self.assertEqual(len(state['evaluation_sessions']), 1)
             self.assertIsNone(state['pending_charge'])
             session = run/'evaluation/capture'/state['evaluation_sessions'][0]['name']
+            request = json.loads((session/'request.json').read_text())
+            self.assertEqual(request, dict(schema='evaluation-session-v1', identity=inputs['identity'],
+                config=config, cases=[dict(id=case['id'], messages=case['messages']) for case in cases]))
+            execution = json.loads((session/'execution/configuration.json').read_text())
+            self.assertEqual(execution['limits']['phase_seconds'], 30)
+            self.assertEqual(execution['limits']['total_seconds'], 30)
+            self.assertEqual(json.loads((session/'progress.json').read_text()), dict(index=2, state='COMPLETE'))
+            self.assertFalse((session/'execution/request.json').exists())
             self.assertIn('Synthetic tokenizer library banner', (session/'execution/stdout.log').read_text())
             self.assertIn('Synthetic tokenizer library warning', (session/'execution/stderr.log').read_text())
             ledger = [json.loads(line) for line in (session/'resources.jsonl').read_text().splitlines()]
@@ -206,6 +224,46 @@ class EvaluationCommandTests(unittest.TestCase):
             self.assertEqual(json.loads(full_report.stdout), report)
             self.assertEqual(full_report.stderr, '')
             self.assertEqual([json.loads(line) for line in (root/'events.jsonl').read_text().splitlines()], events)
+
+            page = (run/'evaluation/review/index.html').read_text()
+            self.assertNotIn('<script>bad()', page)
+            self.assertNotIn('<textarea', page)
+            self.assertLess(page.index('Source cells'), page.index('Reference'))
+            self.assertLess(page.index('Reference'), page.index('Answer'))
+            decisions = json.loads((run/'evaluation/review/template.json').read_text())
+            self.assertEqual([decision['id'] for decision in decisions], ['0', '2'])
+            for decision in decisions:
+                decision['reviewed'] = True
+            review = root/'review.json'
+            review.write_text(json.dumps(decisions))
+            imported = execute('--decisions', str(review), '--json', action='review-import', expected_returncode=0)
+            completed = json.loads(imported.stdout)
+            self.assertEqual(completed['status'], 'COMPLETE')
+            self.assertTrue(completed['valid_accuracy'])
+            self.assertEqual(completed['targets'], 3)
+            self.assertEqual(completed['aggregate']['format_valid'], 2)
+            self.assertEqual(completed['aggregate']['source_value_correct'], 2)
+            repeated = execute('--decisions', str(review), '--json', action='review-import', expected_returncode=0)
+            self.assertEqual(json.loads(repeated.stdout), completed)
+            decisions[0]['quotation_errors'] = ['issuer_name']
+            review.write_text(json.dumps(decisions))
+            conflict = execute('--decisions', str(review), action='review-import', expected_returncode=1)
+            self.assertIn('Review conflicts with a committed decision', conflict.stderr)
+            regenerated = execute('--report-only', '--json', expected_returncode=0)
+            self.assertEqual(json.loads(regenerated.stdout), completed)
+            self.assertEqual(json.loads((run/'evaluation/report.json').read_text()), completed)
+            current = json.loads((run/'run.json').read_text())
+            self.assertEqual(current['consumed_seconds'], state['consumed_seconds'])
+            self.assertEqual(current['evaluation_sessions'], state['evaluation_sessions'])
+            self.assertEqual([json.loads(line) for line in (root/'events.jsonl').read_text().splitlines()], events)
+            artifact_root = os.environ.get('PROXYBENCH_TEST_ARTIFACT_DIR')
+            if artifact_root:
+                artifact = Path(artifact_root)/'evaluation-command'
+                shutil.copytree(run, artifact)
+                replay = subprocess.run([*command, 'evaluate', '--run-dir', str(artifact), '--report-only', '--json'],
+                    cwd=root, env=environment, capture_output=True, text=True, timeout=20)
+                self.assertEqual(replay.returncode, 0, replay.stderr)
+                self.assertEqual(json.loads(replay.stdout), completed)
 
 
 if __name__ == '__main__':

@@ -28,9 +28,6 @@ class ValidationEnvironmentTests(unittest.TestCase):
     def check_environment(self):
         require_project_environment(self.training, self.inference)
 
-    def test_project_environment_and_retained_models_are_supported(self):
-        self.check_environment()
-
     def test_other_environment_and_artifact_interpreters_are_rejected(self):
         with patch('sys.prefix', str(self.root / 'other')):
             with self.assertRaisesRegex(ValueError, 'project .venv'):
@@ -82,6 +79,7 @@ class ValidationEnvironmentTests(unittest.TestCase):
                 self.check_environment()
 
     def test_rejection_precedes_output_and_worker_launch(self):
+        self.check_environment()
         from types import SimpleNamespace
         args = SimpleNamespace(run_dir=self.root / 'result', training_config='training', config='inference')
         with patch('proxybench.extraction.runtime.load_config', side_effect=[self.training, self.inference]), \

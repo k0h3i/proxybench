@@ -21,4 +21,5 @@ Use an external workspace for each future run.
 Keep temporary model rollback copies only until the bounded loading tests pass.
 Do not delete the last working originals before that gate.
 Model files remain ignored by Git, with this guide as the tracked exception.
-See the [inference guide](../docs/inference.md) and [release guide](../docs/release.md).
+See the [inference guide](../docs/inference.md) for loading requirements.
+Before publishing model files, follow the [model card](../MODEL_CARD.md#model-publication).

@@ -76,29 +76,6 @@ class TestingDatasetTests(unittest.TestCase):
         atomic_json(receipt, approval)
         return path, receipt
 
-    def test_export_rebuilds_exact_references_and_training_refuses_test(self):
-        path, receipt = self.receipt()
-        accept_test_review(self.root, self.review, path, receipt, self.output)
-        rows, manifest = read_test_release(self.output, project_root=self.root)
-        self.assertEqual(len(rows['test']), 2)
-        self.assertEqual(set(manifest['files']), {'test'})
-        self.assertEqual({p.name for p in self.output.iterdir()}, {'test-examples.jsonl', 'dataset-manifest.json'})
-        self.assertEqual(manifest['acceptance']['review']['content'].encode(), path.read_bytes())
-        self.assertEqual(manifest['acceptance']['approval']['content'].encode(), receipt.read_bytes())
-        self.assertEqual(manifest['acceptance']['preparation']['content'].encode(),
-                         (self.review / 'preparation.json').read_bytes())
-        self.assertEqual([m['role'] for m in rows['test'][0]['messages']], ['system','user','assistant'])
-        with self.assertRaisesRegex(ValueError, 'unsupported dataset'):
-            read_release(self.output, project_root=self.root)
-        model = self.root / 'model.gguf'
-        model.write_bytes(b'synthetic model')
-        inputs = prepare_inputs(self.output, model, {}, project_root=self.root)
-        self.assertEqual(inputs['dataset_split'], 'test')
-        self.assertEqual(inputs['identity']['split'], 'test')
-        self.assertEqual(inputs['identity']['scorer_version'], 'source-cells-v1')
-        for case in inputs['cases']:
-            self.assertEqual([m['role'] for m in case['messages']], ['system','user'])
-
     def test_changed_contract_or_review_cannot_be_accepted(self):
         path, receipt = self.receipt()
         (self.root / 'docs/label-contract.md').write_text('Changed contract')
@@ -276,7 +253,13 @@ class TestingDatasetTests(unittest.TestCase):
         self.families()
         self.context()
         path, receipt = self.receipt()
-        accept_test_review(self.root, self.review, path, receipt, self.output)
+        manifest = accept_test_review(self.root, self.review, path, receipt, self.output)
+        self.assertEqual(set(manifest['files']), {'test'})
+        self.assertEqual({p.name for p in self.output.iterdir()}, {'test-examples.jsonl', 'dataset-manifest.json'})
+        self.assertEqual(manifest['acceptance']['review']['content'].encode(), path.read_bytes())
+        self.assertEqual(manifest['acceptance']['approval']['content'].encode(), receipt.read_bytes())
+        self.assertEqual(manifest['acceptance']['preparation']['content'].encode(),
+                         (self.review / 'preparation.json').read_bytes())
         # Retain only policies, canonical test originals, the ledger, and the
         # final two-file dataset. Even prior raw evidence is no longer needed.
         for item in self.root.iterdir():
@@ -293,9 +276,14 @@ class TestingDatasetTests(unittest.TestCase):
                     item.unlink()
         rows, manifest = read_test_release(self.output, project_root=self.root)
         self.assertEqual(len(rows['test']), 2)
+        self.assertEqual([m['role'] for m in rows['test'][0]['messages']], ['system','user','assistant'])
+        with self.assertRaisesRegex(ValueError, 'unsupported dataset'):
+            read_release(self.output, project_root=self.root)
         model = self.root / 'synthetic-model.gguf'
         model.write_bytes(b'CPU input checks only')
         inputs = prepare_inputs(self.output, model, {}, project_root=self.root)
+        self.assertEqual(inputs['dataset_split'], 'test')
+        self.assertEqual(inputs['identity']['split'], 'test')
         self.assertEqual(inputs['identity']['scorer_version'], 'source-cells-v1')
         self.assertTrue(all([m['role'] for m in case['messages']] == ['system', 'user'] for case in inputs['cases']))
 

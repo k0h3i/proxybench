@@ -128,7 +128,22 @@ The accepted dataset and merged GGUF files remain private.
 Adapter license terms remain unselected, as stated in the Hugging Face model cards.
 This card does not assign blanket license terms to source filings, labels, or model weights.
 
-The [release guide](docs/release.md) covers model license terms, attribution, privacy review, and approval of the exact upload list.
 The [README references](README.md#acknowledgments-and-references) credit the base model, training methods, and supporting software.
 For nonsensitive model questions, use a project issue.
 For sensitive reports, follow the [security policy](SECURITY.md#reporting-and-release-review).
+
+## Model publication
+
+Prepare the exact file list before asking for publication approval.
+Review the model license terms, pinned base model license, and required attribution separately from the code license.
+Before publishing an adapter, test loading with the pinned base revision.
+
+Stage only Safetensors weights, portable configuration, necessary tokenizer files, notices, and the model card.
+Include the exact system prompt and portable model metadata.
+Exclude optimizer state, run output, labels, tokens, hidden folders, and `.env` files.
+
+Before requesting publication approval, follow the [security policy](SECURITY.md#reporting-and-release-review).
+Compare exact training messages against the private list of known owner identifiers.
+If private identifiers entered training, hold the adapter for assessment.
+Present the exact model files, license terms, and notices to the user.
+Upload only after separate authorization.

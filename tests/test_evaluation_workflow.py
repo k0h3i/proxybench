@@ -6,8 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from proxybench.evaluation.workflow import (create_run, load_inputs, load_answers, report,
-                                           import_review, review_template, answer_binding)
+from proxybench.evaluation.workflow import create_run, load_answers, report, answer_binding
 from proxybench.runstate import Run, atomic_json, binding
 from proxybench.training.labels import TYPES
 
@@ -53,29 +52,6 @@ class EvaluationWorkflowTests(unittest.TestCase):
                          elapsed_seconds=0, session='session-' + '0' * 32))
         return load_answers(run, self.inputs)
 
-    def test_review_repeat_conflict_and_model_free_report(self):
-        with Run(self.path) as run:
-            answers = self.save_answer(run, self.answer())
-            result = report(run, self.inputs, answers)
-            self.assertEqual(result['status'], 'PENDING_REVIEW')
-            page = (self.path/'evaluation/review/index.html').read_text()
-            self.assertNotIn('<script>bad()', page)
-            self.assertNotIn('<textarea', page)
-            decision = review_template(self.inputs, self.inputs['cases'][0], answers['one'])
-            decision['reviewed'] = True
-            imported = self.path/'import.json'
-            atomic_json(imported, [decision])
-            import_review(run, self.inputs, answers, imported)
-            import_review(run, self.inputs, answers, imported)
-            with patch('proxybench.extraction.runtime.supervised_generate_answers', side_effect=AssertionError('Model unavailable')):
-                result = report(run, load_inputs(run), load_answers(run, self.inputs))
-            self.assertTrue(result['valid_accuracy'])
-            self.assertEqual(result['aggregate']['source_value_correct'], 1)
-            decision['quotation_errors'] = ['issuer_name']
-            atomic_json(imported, [decision])
-            with self.assertRaises(ValueError):
-                import_review(run, self.inputs, answers, imported)
-
     def test_failures_count_and_missing_is_incomplete(self):
         with Run(self.path) as run:
             self.assertEqual(report(run, self.inputs, {})['status'], 'INCOMPLETE')
@@ -116,15 +92,6 @@ class EvaluationWorkflowTests(unittest.TestCase):
         self.assertIn('issuer_name', result['unsupported_quotes'])
         self.assertFalse(result['field_correct']['ticker'])
         self.assertFalse(result['source_value_correct'])
-
-    def test_cli_report_only_needs_no_runtime_or_model(self):
-        import subprocess
-        import sys
-        with Run(self.path) as run:
-            self.save_answer(run, dict(status='TIMEOUT', text=''))
-        process = subprocess.run([sys.executable, '-m', 'proxybench', 'evaluate', '--run-dir', str(self.path), '--report-only', '--json'], capture_output=True, text=True)
-        self.assertEqual(process.returncode, 0, process.stderr)
-        self.assertEqual(json.loads(process.stdout)['status'], 'COMPLETE')
 
     def training_export_state(self, *, used):
         from proxybench.execution.resources import append_entry

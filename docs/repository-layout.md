@@ -53,4 +53,5 @@ Keep raw outputs until their intended review is complete.
 A completed future run does not delete itself.
 Only an explicitly selected final model can enter the retained model folder.
 Do not preserve old campaign code or an experiment archive.
-Read the [training guide](training.md), [inference guide](inference.md), and [release guide](release.md) for their separate gates.
+Read the [training guide](training.md) and [inference guide](inference.md) for their execution requirements.
+Model publication requires separate approval under the [model card](../MODEL_CARD.md#model-publication).

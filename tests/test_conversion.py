@@ -38,12 +38,6 @@ class ConverterSourceTests(unittest.TestCase):
         self.pin.start()
         self.addCleanup(self.pin.stop)
 
-    def test_accepts_complete_extraction_without_git(self):
-        result = conversion.validate_converter_source(self.source)
-        self.assertEqual(result['source_commit'], '329b6160f513915f1c607dbfae3d5ce864a64a4f')
-        self.assertEqual(result['archive_sha256'], self.accepted_hash)
-        self.assertEqual(set(result['files']), {*self.files, conversion.SOURCE_ARCHIVE_NAME})
-
     def test_rejects_altered_source_and_non_source_files(self):
         for name, original in self.files.items():
             with self.subTest(name=name):
@@ -116,6 +110,9 @@ class ConverterSourceTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_rechecks_source_before_payload_inspection_imports(self):
+        source = conversion.validate_converter_source(self.source)
+        self.assertEqual(source['archive_sha256'], self.accepted_hash)
+        self.assertEqual(set(source['files']), {*self.files, conversion.SOURCE_ARCHIVE_NAME})
         model = Path(self.folder.name) / 'model'
         model.mkdir()
         (model / 'manifest.json').write_text('{}')

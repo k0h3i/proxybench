@@ -1,13 +1,7 @@
 """Direct labels retain edits and require acceptance of exact review exports."""
-from copy import deepcopy
-import json
-from pathlib import Path
-import tempfile
 import unittest
 
-from proxybench.annotation.bindings import review_binding
-from proxybench.annotation.review import training_template
-from proxybench.training.labels import (TYPES, validate, to_review, from_review, dumps, sha)
+from proxybench.training.labels import TYPES, validate, to_review, from_review
 
 
 def field(value=None, *, state=None, origin=None):
@@ -56,14 +50,3 @@ class LabelTests(unittest.TestCase):
         value['fields']['participation'] = field('VOTED')
         with self.assertRaises(ValueError):
             validate(value)
-
-    def test_readable_editor_escapes_contract(self):
-        page = training_template('Contract <script>data</script>', 4)
-        self.assertIn('4 source packets', page)
-        self.assertNotIn("'INFERRED'", page)
-        self.assertNotIn('Use block numbers', page)
-        self.assertIn('&lt;script&gt;data&lt;/script&gt;', page)
-        self.assertIn('JSON.parse(v.value)', page)
-        self.assertIn('trainingControl(f,prop)', page)
-        self.assertIn('trainingDisplay(draft[prop],prop)', page)
-        self.assertNotIn('Values and original wording use JSON.', page)

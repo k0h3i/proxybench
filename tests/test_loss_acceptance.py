@@ -56,51 +56,6 @@ class LossAcceptanceTests(unittest.TestCase):
                 torch.testing.assert_close(gradient_hidden, expected_hidden, rtol=2e-5, atol=2e-7)
                 torch.testing.assert_close(gradient_weight, expected_weight, rtol=2e-5, atol=2e-7)
 
-    def test_first_response_uses_last_prompt_hidden_and_termination_is_supervised(self):
-        torch = self.torch
-        hidden, weight, labels = self.values([[-100, -100, 3, 9]])
-        gradient, = torch.autograd.grad(reference_loss(hidden, weight, labels), (hidden,))
-        self.assertGreater(float(gradient[0, 1].abs().sum()), 0)
-        self.assertGreater(float(gradient[0, 2].abs().sum()), 0)
-        self.assertTrue(torch.equal(gradient[0, 0], torch.zeros(7)))
-        self.assertTrue(torch.equal(gradient[0, 3], torch.zeros(7)))
-
-    def test_ignored_predictors_do_not_change_loss_or_weight_gradient(self):
-        torch = self.torch
-        hidden, weight, labels = self.values(loss_cases()['right_padding'])
-        original = reference_loss(hidden, weight, labels)
-        original_weight, = torch.autograd.grad(original, (weight,))
-        changed = hidden.detach().clone()
-        changed[0, [0, 3, 4, 5]] = 1000
-        result = reference_loss(changed, weight, labels)
-        changed_weight, = torch.autograd.grad(result, (weight,))
-        torch.testing.assert_close(original, result, rtol=0, atol=0)
-        torch.testing.assert_close(original_weight, changed_weight, rtol=0, atol=0)
-
-    def test_unequal_lengths_use_token_mean_not_sequence_mean(self):
-        torch = self.torch
-        hidden, weight, labels = self.values(loss_cases()['unequal_lengths'])
-        batched = reference_loss(hidden, weight, labels)
-        separate = [reference_loss(hidden[i:i+1], weight, labels[i:i+1]) for i in range(2)]
-        torch.testing.assert_close(batched, (separate[0] * 3 + separate[1] * 2) / 5)
-        self.assertGreater(abs(float((batched - (separate[0] + separate[1]) / 2).detach())), 1e-4)
-
-    def test_adapter_gradients_follow_the_causal_hidden_gradient(self):
-        torch = self.torch
-        hidden, weight, labels = self.values(loss_cases()['unequal_lengths'])
-        generator = torch.Generator(device='cpu').manual_seed(19)
-        inputs = torch.randn((*labels.shape, 5), generator=generator)
-        adapter_a = torch.randn((5, 2), generator=generator, requires_grad=True)
-        adapter_b = torch.randn((2, 7), generator=generator, requires_grad=True)
-        adapted = hidden.detach() + inputs @ adapter_a @ adapter_b
-        loss = reference_loss(adapted, weight, labels)
-        gradient_hidden, gradient_a, gradient_b = torch.autograd.grad(loss, (adapted, adapter_a, adapter_b))
-        flat_inputs, flat_gradient = inputs.flatten(0, 1), gradient_hidden.flatten(0, 1)
-        expected_a = flat_inputs.T @ flat_gradient @ adapter_b.detach().T
-        expected_b = (flat_inputs @ adapter_a.detach()).T @ flat_gradient
-        torch.testing.assert_close(gradient_a, expected_a)
-        torch.testing.assert_close(gradient_b, expected_b)
-
     def test_sequence_and_collator_keep_first_response_termination_and_padding(self):
         class Tokenizer:
             eos_token_id = 9

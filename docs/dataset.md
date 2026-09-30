@@ -105,7 +105,7 @@ Use `.venv/bin/python -m proxybench import-source --help` for optional filing me
 Continue with [manual target selection](#manual-target-selection), then [label review and acceptance](#label-review-and-acceptance).
 
 Importing a local source does not authorize public redistribution.
-Follow the [release guide](release.md) before publishing a project source archive.
+Before publishing a project source archive, follow the [data notice](../DATA_NOTICE.md#source-redistribution).
 
 ## Manual target selection
 
@@ -159,4 +159,4 @@ It needs no parent dataset or experiment output.
 The reader rebuilds each user message from its source selection and compares it with the saved message.
 It also checks source hashes, prompt bytes, row hashes, order, duplicate targets, labels, and exposure restrictions.
 Without separate authorization for an exact release list, keep local source copies and label files out of Git.
-See the [release guide](release.md) for raw-source review.
+See the [data notice](../DATA_NOTICE.md#source-redistribution) for source redistribution requirements.

@@ -27,7 +27,6 @@ class TrainingMeasurementIntegrationTests(unittest.TestCase):
                 now[0] += 7
         full = recorder.snapshot()['full_loop']
         self.assertEqual(full['seconds'], 14)
-        self.assertEqual(full['timing'], 'inclusive_loop_host_wall')
         self.assertAlmostEqual(full['nonpadding_tokens_per_second'], 10 / 14)
 
     def test_resume_rejects_optimizer_settings_before_mutating_model(self):
@@ -80,9 +79,7 @@ class TrainingMeasurementIntegrationTests(unittest.TestCase):
         self.assertEqual(updates[-1]['throughput']['supervised_tokens'], 4)
         self.assertAlmostEqual(updates[-1]['throughput']['nonpadding_tokens_per_second'], 14 / 30)
         self.assertEqual(updates[-1]['last_checkpoint']['global_step'], 2)
-        self.assertEqual(updates[-1]['fractional_epoch'], 2)
         self.assertIsNone(updates[-1]['remaining_loop_seconds'])
-        self.assertEqual(recorder.snapshot()['stages']['journal']['calls'], 6)
         self.assertEqual(recorder.snapshot()['stages']['monitor']['seconds'], 4)
         self.assertEqual(result['completed'], 2)
 

@@ -537,4 +537,4 @@ If test findings guide development, identify subsequent runs as regression evalu
 Regression evaluations measure behavior after changes on an already inspected set.
 This log contains reviewed results for ProxyType-4B, ProxyType-9B, the Qwen3.5-4B base, and the separately described Luna and Sol agent runs.
 The source task and scoring rules remain frozen, while the agent execution conditions differ from the local runs.
-Public release remains a separate gate under the [release guide](release.md).
+Data and model publication require separate approval under the [data notice](../DATA_NOTICE.md#source-redistribution) and [model card](../MODEL_CARD.md#model-publication).

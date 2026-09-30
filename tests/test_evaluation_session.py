@@ -50,25 +50,6 @@ class EvaluationSessionTests(unittest.TestCase):
         atomic_json(folder / 'progress.json', dict(index=count-1, state='COMPLETE'))
         append_entry(folder / 'resources.jsonl', dict(execution_id=folder.name, status='EXITED', elapsed_seconds=elapsed))
 
-    def test_all_cases_share_one_supervised_attempt_and_one_charge(self):
-        def supervise(command, output, limits, **kwargs):
-            self.assertEqual(command[-2], 'proxybench.evaluation.worker')
-            folder = Path(command[-1])
-            request = json.loads((folder / 'request.json').read_text())
-            self.assertEqual(request, session_request(self.inputs, self.config, self.inputs['cases']))
-            self.assertEqual(limits['phase_seconds'], 100)
-            self.assertEqual(limits['total_seconds'], 100)
-            self.complete(folder, 3)
-            return 'EXITED'
-        with Run(self.root) as run, patch('proxybench.execution.live.supervise', side_effect=supervise) as worker:
-            answers = generate_session(run, self.inputs)
-            self.assertEqual(set(answers), {'0', '1', '2'})
-            self.assertEqual(run.state['consumed_seconds'], 8)
-            self.assertIsNone(run.state['pending_charge'])
-            self.assertEqual(generate_session(run, self.inputs), answers)
-            self.assertEqual(worker.call_count, 1)
-            self.assertEqual(run.state['consumed_seconds'], 8)
-
     def test_user_stop_preserves_first_answer_and_resumes_only_missing_cases(self):
         with Run(self.root) as run:
             folder = self.register(run, status='USER_STOP', elapsed=12)

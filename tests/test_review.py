@@ -50,23 +50,6 @@ class ReviewTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_suggestions(path, packets)
 
-    def test_page_keeps_source_input_separate_and_escapes_suggestions(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            _, path = self.fixture(root)
-            source_path = root / 'review/packet-set.json'
-            original = source_path.read_bytes()
-            data = json.loads(path.read_text())
-            data['packets']['synthetic-1']['fields']['ticker']['note'] = '</script><script>alert(1)</script>'
-            path.write_text(json.dumps(data))
-            raw_drafts = path.read_bytes()
-            page = write_review(root, packet_directory="review", training_contract="Contract", draft_path=path).read_text()
-            self.assertNotIn('</script><script>alert(1)</script>', page)
-            self.assertIn('id="assistant-data"', page)
-            self.assertIn('id="reveal" class="primary" disabled', page)
-            self.assertEqual(source_path.read_bytes(), original)
-            self.assertEqual(path.read_bytes(), raw_drafts)
-
     def test_literal_template_markers_round_trip_in_source_and_drafts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -77,13 +60,21 @@ class ReviewTests(unittest.TestCase):
             data['packets']['synthetic-1']['input_binding'] = review_binding(packets[0])
             data['packets']['synthetic-1']['fields']['ticker']['note'] = markers
             path.write_text(json.dumps(data))
-            (root / 'review/packet-set.json').write_text(json.dumps(packets))
-            page = write_review(root, packet_directory="review", training_contract="Contract", draft_path=path).read_text()
+            source_path = root / 'review/packet-set.json'
+            source_path.write_text(json.dumps(packets))
+            original = source_path.read_bytes()
+            raw_drafts = path.read_bytes()
+            page = write_review(root, packet_directory="review",
+                                training_contract="Contract <script>data</script>", draft_path=path).read_text()
             payload = json.loads(re.search(r'<script id="packet-data" type="application/json">(.*?)</script>', page, re.S)[1])
             drafts = json.loads(re.search(r'<script id="assistant-data" type="application/json">(.*?)</script>', page, re.S)[1])
             self.assertEqual(payload[0]['source_view'], packets[0]['source_view'])
             self.assertEqual(drafts['packets']['synthetic-1']['fields']['ticker']['note'], markers)
             self.assertNotIn('</script><script>literal</script>', page)
+            self.assertIn('&lt;script&gt;data&lt;/script&gt;', page)
+            self.assertRegex(page, r'<button\b(?=[^>]*id="reveal")(?=[^>]*\bdisabled)[^>]*>')
+            self.assertEqual(source_path.read_bytes(), original)
+            self.assertEqual(path.read_bytes(), raw_drafts)
 
     def test_stale_display_and_model_bundle_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

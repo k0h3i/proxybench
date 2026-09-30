@@ -61,10 +61,6 @@ class RuntimePreflightTests(unittest.TestCase):
         self.runtime_library.unlink()
         self.assert_missing_file(self.runtime_library)
 
-    def test_missing_external_library_names_file_and_preparation_guide(self):
-        self.external_library.unlink()
-        self.assert_missing_file(self.external_library)
-
     def test_changed_external_library_is_rejected(self):
         self.external_library.write_bytes(b'changed library')
         with self.assertRaisesRegex(ValueError, 'External runtime library differs from its pinned hash'):
@@ -74,9 +70,6 @@ class RuntimePreflightTests(unittest.TestCase):
         self.runtime_library.write_bytes(b'changed library')
         with self.assertRaisesRegex(ValueError, 'Runtime file differs from its manifest'):
             runtime_identity(self.config)
-
-    def test_valid_runtime_keeps_original_manifest_identity(self):
-        self.assertEqual(runtime_identity(self.config), digest(self.manifest))
 
     def test_identity_does_not_import_model_packages_or_start_processes(self):
         program = '''

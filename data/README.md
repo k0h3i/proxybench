@@ -13,5 +13,5 @@ Finalized loading needs no preparation folder or parent training dataset.
 These files remain ignored by Git.
 This usage guide is the tracked exception.
 Follow the [dataset guide](../docs/dataset.md) for preparation and explicit acceptance.
-Follow the [release guide](../docs/release.md) before selecting public raw files.
+Before selecting public source files, follow the [data notice](../DATA_NOTICE.md#source-redistribution).
 A raw-source release does not authorize publishing accepted labels.

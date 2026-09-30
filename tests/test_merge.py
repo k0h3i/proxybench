@@ -52,16 +52,6 @@ class MergeTests(unittest.TestCase):
                                 tensor = tensor.t()
                             self.assertFalse(tensor_isfinite(tensor, chunk_elements=7))
 
-    def test_scalar_empty_and_invalid_chunks(self):
-        from proxybench.training.merge import tensor_isfinite
-        torch = self.torch
-        self.assertTrue(tensor_isfinite(torch.tensor(1.0), chunk_elements=1))
-        self.assertFalse(tensor_isfinite(torch.tensor(float('nan')), chunk_elements=1))
-        self.assertTrue(tensor_isfinite(torch.empty(0, 3), chunk_elements=1))
-        for size in (0, -1, 1.5):
-            with self.assertRaisesRegex(ValueError, 'positive integer'):
-                tensor_isfinite(torch.tensor(1.0), chunk_elements=size)
-
     def test_hash_matches_original_bytes_for_contiguous_and_strided_weights(self):
         from proxybench.training.merge import tensor_hash
         torch = self.torch

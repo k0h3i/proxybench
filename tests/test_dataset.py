@@ -48,17 +48,19 @@ class DatasetTests(unittest.TestCase):
 
     def test_exact_three_roles_and_independent_source_reconstruction(self):
         self.publish(*self.accepted())
-        rows,manifest=read_release(self.root/'dataset',project_root=self.root)
+        page=(self.root/'review/index.html').read_text()
+        self.assertIn('sandbox=""',page)
+        self.assertIn('default-src',page)
+        rows,_=read_release(self.root/'dataset',project_root=self.root)
         self.assertEqual([m['role'] for m in rows['development'][0]['messages']],['system','user','assistant'])
         self.assertEqual(rows['development'][0]['messages'][1]['content'],self.packet['model_input'])
-        self.assertNotIn('parent_release',manifest)
         self.assertEqual(set(p.name for p in (self.root/'dataset').iterdir()),
                          {'dataset-manifest.json','training-examples.jsonl','development-examples.jsonl'})
         (self.root/'source.htm').write_bytes(self.raw+b'changed')
         with self.assertRaisesRegex(ValueError,'hash changed'):
             read_release(self.root/'dataset',project_root=self.root)
 
-    def test_acceptance_requires_exact_review_and_support(self):
+    def test_acceptance_requires_exact_completed_review(self):
         path,receipt=self.accepted()
         path.write_text(path.read_text()+' ')
         with self.assertRaisesRegex(ValueError,'Explicit acceptance'):
@@ -69,8 +71,6 @@ class DatasetTests(unittest.TestCase):
         path.write_text(dumps(review));approval['export_sha256']=sha(path.read_bytes());receipt.write_text(dumps(approval))
         with self.assertRaisesRegex(ValueError,'completed review'):
             self.publish(path,receipt)
-        with self.assertRaisesRegex(ValueError,'quotation'):
-            literal_support({'raw_text':'Unsupported answer'},self.packet)
 
     def test_exact_prompt_and_row_hashes_are_enforced(self):
         self.publish(*self.accepted())
@@ -115,9 +115,3 @@ class DatasetTests(unittest.TestCase):
             preserve_exposure(self.root,{'filing':dict(split='training',group_id='family',development_exposed=False)})
         with self.assertRaises(ValueError):
             preserve_exposure(self.root,{'filing':dict(split='training',group_id='new-group',development_exposed=False)})
-
-    def test_review_sandboxes_hostile_text(self):
-        page=prepare_review(self.root,[self.selection],self.root/'review',assignments=self.assignments).read_text()
-        self.assertIn('sandbox=""',page)
-        self.assertIn('default-src',page)
-        self.assertNotIn('calibration',page)

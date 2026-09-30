@@ -174,7 +174,7 @@ Until they pass, model migration remains pending.
 Keep future run output outside `artifacts/`.
 Promote only an explicitly selected final model into `artifacts/models/`, with overwrite protection.
 Keep the adapter, final GGUF, required tokenizer files, and portable model metadata.
-Public release requires the separate [release gate](release.md).
+Model publication requires separate approval under the [model card](../MODEL_CARD.md#model-publication).
 
 ## Preparation stage before GPU work
 

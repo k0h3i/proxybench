@@ -307,7 +307,7 @@ Read the [model card](MODEL_CARD.md) for the model's intended use and remaining 
 
 Code, source filings, accepted labels, and model weights have separate rights and release decisions.
 The [data notice](DATA_NOTICE.md) records SEC source attribution and redistribution guidance.
-The [release guide](docs/release.md) covers the required review and approval before publication.
+The [model card](MODEL_CARD.md#model-publication) covers review and approval of model uploads.
 The [security policy](SECURITY.md) explains how to handle untrusted filings and report sensitive material.
 
 ## Acknowledgments and references
@@ -336,4 +336,4 @@ Citations credit upstream work and do not replace license obligations.
 The pinned Qwen weights use [Apache 2.0](https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/LICENSE).
 Unsloth Core and Unsloth Zoo have separate [Core](https://github.com/unslothai/unsloth#license) and [Zoo](https://github.com/unslothai/unsloth-zoo/blob/main/LICENSE) license terms.
 Before redistribution, follow each applicable license for notices, attribution, source availability, and modified files.
-The [release procedure](docs/release.md) covers review of the exact files selected for publication.
+Before publication, complete the [security review](SECURITY.md#reporting-and-release-review) for the exact files and selected history.

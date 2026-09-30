@@ -22,7 +22,8 @@ Do not start a new training campaign to test a file move.
 Keep the last working model originals until the moved adapter and GGUF pass loading tests.
 
 Public release is a separate gate.
-Follow [docs/release.md](docs/release.md) before preparing public content or changing visibility.
+Before preparing public content or changing visibility, follow the [security policy](SECURITY.md#reporting-and-release-review).
+Follow the [data notice](DATA_NOTICE.md#source-redistribution) for source archives and the [model card](MODEL_CARD.md#model-publication) for model uploads.
 Do not rewrite private history, force-push, or upload data or models without explicit authorization.
 Keep paid APIs and cloud GPUs outside the local resource scope.
 
@@ -62,7 +63,17 @@ Keep publication of private commits separate from GPU and public-release approva
 
 ## Validation
 
-Run focused behavior tests for code changes and the retained CPU suite after integration.
+End-to-end (E2E) tests exercise complete user workflows.
+A unit test exercises one small part in isolation.
+Never write unit tests after you write code.
+Strongly prefer E2E tests as the sole testing mechanism.
+Use E2E tests to make sure that complex features work.
+An artifact is a saved, inspectable test result.
+At the end of each E2E test, produce a verifiable and repeatable artifact.
+If you must test a system in isolation, first write down all the ways it can fail.
+Then write the code.
+Keep an isolated test only when it catches a real failure that retained E2E tests miss.
+Run the retained CPU suite after integration.
 For documentation, inspect local links, Markdown structure, and `git diff --check`.
 For packaging, build the package and inspect its contents for private files.
 Test source boundaries, unsupported values, hostile markup, and stale review decisions when those behaviors change.

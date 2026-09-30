@@ -378,4 +378,4 @@ Installation failures leave preparation incomplete.
 After acceptance, remove the temporary directories recorded in `PROXYBENCH_SETUP_DIR` and `PROXYBENCH_SOURCE_SETUP_DIR`.
 After preparation passes, use the [bounded load command](training.md#bounded-user-launched-load-command).
 The user launches that GPU command.
-Public release remains a separate [review gate](release.md).
+Publication requires separate approval and the [security review](../SECURITY.md#reporting-and-release-review).
