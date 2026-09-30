@@ -170,6 +170,30 @@ class OperationDisplayTests(unittest.TestCase):
             self.assertNotIn('complete', text)
             self.assertNotIn('diagnostics', text)
 
+    def test_adapter_loading_display_keeps_logs_quiet_and_reports_inference(self):
+        display = self.make_display(operation='validate-adapter', phase_seconds=900)
+        display.render(immediate=True)
+        display.feed_stdout(b'Unsloth banner\nPhase: inference\n', final=True)
+        display.feed_stderr(b'Compiler warning\n')
+        display.observe(dict(phase='inference'))
+        display.finish('EXITED')
+        text = ''.join(self.output)
+        self.assertIn('Inference | elapsed 0m00s | budget 15m00s', text)
+        self.assertIn('Adapter loading test worker finished.', text)
+        for hidden in ('Unsloth', 'Compiler warning', 'Phase: inference', 'Generation finished', 'diagnostics'):
+            self.assertNotIn(hidden, text)
+
+    def test_adapter_loading_failure_keeps_short_diagnostics(self):
+        (self.capture / 'stderr.log').write_bytes(b'Old compiler warning\n' * 1000 + b'Final adapter error\n')
+        display = self.make_display(operation='validate-adapter')
+        display.finish('PROCESS_FAILED')
+        text = ''.join(self.output)
+        self.assertIn('Adapter loading test did not complete. Supervisor status: PROCESS_FAILED.', text)
+        self.assertIn('Final adapter error', text)
+        self.assertIn(f'Worker diagnostics: {self.capture / "stderr.log"}', text)
+        self.assertLess(len(text), 9000)
+        self.assertNotIn('worker finished', text)
+
     def test_message_clears_frame_before_supervisor_stop(self):
         self.display.tty = True
         self.display.render(immediate=True)

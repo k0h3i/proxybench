@@ -8,11 +8,18 @@ import time
 
 PHASES = {
     'loading': 'Loading',
+    'inference': 'Inference',
     'serialization': 'Saving merged model',
     'conversion': 'Conversion',
     'payload-inspection': 'Validating converted model',
     'evaluation': 'Evaluation',
     'cleanup': 'Cleanup',
+}
+OPERATIONS = {
+    'export': 'Export',
+    'convert': 'Convert',
+    'evaluation': 'Evaluation',
+    'validate-adapter': 'Adapter loading test',
 }
 _ESCAPES = re.compile(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]')
 
@@ -44,7 +51,7 @@ class OperationDisplay:
     def __init__(self, write, *, operation, capture_path, tty=False, clock=time.monotonic,
                  started=None, prior_seconds=0, phase_used=0, total_seconds=None,
                  phase_seconds=None, progress=None):
-        if operation not in {'export', 'convert', 'evaluation'}:
+        if operation not in OPERATIONS:
             raise ValueError('Unsupported display operation')
         self.write, self.operation, self.tty, self.clock = write, operation, tty, clock
         self.capture_path = Path(capture_path)
@@ -177,10 +184,11 @@ class OperationDisplay:
             return
         self.render(immediate=True)
         complete = self.counts is not None and self.counts[0] == self.counts[1]
+        label = OPERATIONS[self.operation]
         if status != 'EXITED':
-            self.message(f'{self.operation.capitalize()} did not complete. Supervisor status: {status}.')
+            self.message(f'{label} did not complete. Supervisor status: {status}.')
         elif self.operation != 'evaluation':
-            self.message(f'{self.operation.capitalize()} worker finished.')
+            self.message(f'{label} worker finished.')
         elif complete:
             self.message('Generation finished. Scoring and review are pending.')
         else:

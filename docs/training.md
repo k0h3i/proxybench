@@ -195,6 +195,7 @@ export PROXYBENCH_CUDA_LIB="$PROXYBENCH_RUNTIME"
 ```
 
 The command loads the pinned adapter and final GGUF and requests one synthetic text and one synthetic HTML-context answer from each.
+The adapter loading test shows compact progress and keeps library output in its worker logs.
 It performs no training updates.
 The adapter phase allows at most 900 seconds, and the GGUF phase allows at most 600 seconds.
 Before the test, make old run directories and artifact environments unavailable through a reversible move.

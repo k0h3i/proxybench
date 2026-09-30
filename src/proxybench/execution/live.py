@@ -16,7 +16,7 @@ from proxybench.execution.resources import (
     ledger_entries, process_memory,
 )
 from proxybench.execution.training_display import TrainingDisplay
-from proxybench.execution.operation_display import OperationDisplay
+from proxybench.execution.operation_display import OPERATIONS, OperationDisplay
 
 
 SAFE_STOP_PHASES = frozenset({'training', 'compilation', 'saving', 'saving checkpoint',
@@ -125,7 +125,7 @@ def supervise(command, output, limits, *, ledger, phase, phase_used=0,
                                   started=start, prior_seconds=used, phase_used=phase_used,
                                   total_seconds=limits['total_seconds'], phase_seconds=limits['phase_seconds'],
                                   progress=progress)
-                 if phase in {'evaluation', 'export', 'convert'} else None)
+                 if phase in OPERATIONS else None)
     presentation = training or operation
 
     def show(chunk, *, stdout=False):

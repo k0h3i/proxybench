@@ -108,6 +108,48 @@ raise SystemExit(7)
                 self.assertNotIn('worker finished', text)
                 self.assertNotIn('Generation finished', text)
 
+    def test_adapter_loading_keeps_exact_output_in_logs_only(self):
+        stdout = '🦥 Unsloth banner\nPhase: inference\n'.encode()
+        stderr = b'Compiler warning: _POSIX_C_SOURCE redefined\nLibrary warning: \xff\n'
+        script = f"""import os, sys
+from proxybench.execution.resources import durable_json
+sys.stdout.buffer.write({stdout!r})
+sys.stdout.flush()
+sys.stderr.buffer.write({stderr!r})
+sys.stderr.flush()
+durable_json(os.environ['PROXYBENCH_PHASE_FILE'], dict(phase='inference'))
+"""
+        stream = io.StringIO()
+        result, _, _, _ = self.run_worker(script, phase='validate-adapter', stream=stream,
+                                          expected_stdout=stdout, expected_stderr=stderr)
+        self.assertEqual(result, 'EXITED')
+        text = stream.getvalue()
+        self.assertIn('Inference | elapsed', text)
+        self.assertIn('Adapter loading test worker finished.', text)
+        for hidden in ('Unsloth', 'Compiler warning', 'Library warning', 'Phase: inference', '[validate-adapter:'):
+            self.assertNotIn(hidden, text)
+
+    def test_adapter_loading_failure_still_shows_error_and_log_path(self):
+        stream = io.StringIO()
+        script = """import sys
+print('Hidden Unsloth banner', flush=True)
+sys.stderr.write('Final adapter error\\n')
+sys.stderr.flush()
+raise SystemExit(7)
+"""
+        result, saved, _, record = self.run_worker(script, phase='validate-adapter', stream=stream,
+                                                   expected_stderr=b'Final adapter error\n')
+        self.assertEqual(result, 'PROCESS_FAILED')
+        self.assertEqual(record['returncode'], 7)
+        self.assertIn('Hidden Unsloth banner', saved)
+        text = stream.getvalue()
+        self.assertNotIn('Hidden Unsloth banner', text)
+        self.assertIn('Adapter loading test did not complete. Supervisor status: PROCESS_FAILED.', text)
+        self.assertIn('Final adapter error', text)
+        self.assertIn('Worker diagnostics:', text)
+        self.assertIn('stderr.log', text)
+        self.assertNotIn('worker finished', text)
+
     def test_evaluation_zero_exit_does_not_claim_missing_results_are_finished(self):
         stream = io.StringIO()
         script = """import os
