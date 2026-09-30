@@ -18,8 +18,6 @@ The repository provides tools for the following tasks:
 - [Evaluate answers against development references](#evaluation).
 
 The [ProxyType-4B](https://huggingface.co/rvcarung/ProxyType-4B) and [ProxyType-9B](https://huggingface.co/rvcarung/ProxyType-9B) adapters are public on Hugging Face.
-The accepted dataset and merged GGUF files remain private and are separate inputs.
-The project makes no independently benchmarked accuracy claim.
 
 ## Overview
 
