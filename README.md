@@ -1,7 +1,7 @@
 <h1 align="center">ProxyBench</h1>
 
 [![Code License: Apache 2.0](https://img.shields.io/badge/Code_License-Apache_2.0-green.svg)](LICENSE)
-[![Data: Private](https://img.shields.io/badge/Data-Private-red.svg)](DATA_NOTICE.md)
+[![Source filings: SEC EDGAR](https://img.shields.io/badge/Source_filings-SEC_EDGAR-blue.svg)](DATA_NOTICE.md)
 [![Model Adapters: Hugging Face](https://img.shields.io/badge/Model_Adapters-Hugging_Face-yellow.svg)](https://huggingface.co/rvcarung/ProxyType-4B)
 [![CPU Python: 3.11+](https://img.shields.io/badge/CPU_Python-3.11%2B-blue.svg)](pyproject.toml)
 [![Model Python: 3.12.14](https://img.shields.io/badge/Model_Python-3.12.14-blue.svg)](docs/preparation.md#required-software-and-inputs)
@@ -237,7 +237,7 @@ Installing the Python package alone does not install the NVIDIA driver or llama.
 The preparation guide supplies the exact versions and installation procedures.
 
 Keep project Python packages in the root `.venv/`.
-Keep private sources and labels under `data/`, and retained models under `artifacts/models/`.
+Keep downloaded sources and private labels under `data/`, and retained models under `artifacts/models/`.
 Use separate external folders for future runs and native runtimes.
 The [repository guide](docs/repository-layout.md) explains these storage boundaries.
 
@@ -306,7 +306,7 @@ The model does not provide investment advice.
 Read the [model card](MODEL_CARD.md) for the model's intended use and remaining limits.
 
 Code, source filings, accepted labels, and model weights have separate rights and release decisions.
-The [data notice](DATA_NOTICE.md) describes the private source collection and current distribution status.
+The [data notice](DATA_NOTICE.md) records SEC source attribution and archive review requirements.
 The [release guide](docs/release.md) covers the required review and approval before publication.
 The [security policy](SECURITY.md) explains how to handle untrusted filings and report sensitive material.
 

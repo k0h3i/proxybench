@@ -8,21 +8,106 @@ Future preparation rejects training assignments that conflict with these restric
 
 ## Acquisition and source storage
 
-Keep complete ordinary files in the flat `data/raw/` directory.
-Keep complete test files separately in `data/raw/test/`.
+Keep complete source files in the flat `data/raw/` directory.
 The source manifest records original locations, friendly filenames, accession identities, encodings, and hashes where known.
 Keep amendments and attachments separate.
 Deduplicate identical bytes only when every original source location remains recorded.
 Do not retain incomplete downloads or SEC error pages.
 
-Use `python -m proxybench fetch-source --help` for future SEC requests.
-Set `PROXYBENCH_SEC_IDENTITY` privately before acquisition.
-Inspect the complete download, then use `python -m proxybench import-source --help` to admit it.
-Supply a declared client identity through private runtime configuration.
-The project limits requests to two per second and preserves bounded downloads.
-Do not bypass access blocks.
+### Choose a filing
+
+Open [SEC EDGAR search](https://www.sec.gov/edgar/search/) and filter for `N-PX` or `N-PX/A`.
+Choose the filing year and fund that you need.
+Open the filing details.
+Copy the official HTTPS URL for its complete text submission or an original HTML document.
+Keep the filing year separate from the disclosed reporting period.
+
+The repository supports historical text and HTML with one manually marked voting target.
+PDF processing and optical character recognition, which converts images to text, remain outside scope.
+
+An accession number identifies an SEC filing.
+Record its dashed `0000000000-00-000000` form from the filing details.
+Keep each amendment under its own accession number.
+Use the original SEC filename, without directories, for the download.
+Choose a unique lowercase filename for the imported copy, such as `fund-npx-2014.html`.
+That filename must use only letters, numbers, periods, or hyphens.
+
+### Download the original bytes
+
+Run the commands in Bash from the repository root.
+Source preparation requires Python 3.11 or later and no model dependencies.
+If `.venv/` is missing, create it with `python3 -m venv .venv`.
+Install the CPU package:
+
+```bash
+.venv/bin/python -m pip install -e .
+```
+
 Read the [SEC request guidance](https://www.sec.gov/about/webmaster-frequently-asked-questions) before new acquisition.
+Enter your declared client name and contact email at the hidden prompt.
+The prompt keeps the value out of shell history.
+Enter the document URL, accession number, and original filename from the filing details:
+
+```bash
+read -r -s -p 'SEC client name and contact email: ' PROXYBENCH_SEC_IDENTITY
+printf '\n'
+export PROXYBENCH_SEC_IDENTITY
+read -r -p 'SEC HTTPS document URL: ' PROXYBENCH_SOURCE_URL
+read -r -p 'Accession number (0000000000-00-000000): ' PROXYBENCH_ACCESSION
+read -r -p 'Original SEC filename: ' PROXYBENCH_ORIGINAL_FILENAME
+
+.venv/bin/python -m proxybench fetch-source \
+  --url "$PROXYBENCH_SOURCE_URL" \
+  --output "data/downloads/$PROXYBENCH_ACCESSION/$PROXYBENCH_ORIGINAL_FILENAME" \
+  --ledger data/sec-download-ledger.json \
+  --kind filing
+```
+
+The download stays outside `data/raw/` until you inspect it.
+A download ledger records requests, byte counts, file counts, and access blocks.
+Reuse `data/sec-download-ledger.json` for related requests.
+Do not start concurrent download commands.
+The downloader limits requests to two per second, each document to 100 MiB, and the ledger to 4 GiB and 60 filings.
+Do not bypass access blocks or replace a blocked ledger to continue requests.
+
+The downloader requires at least 4 GiB available host memory.
+Free disk space must cover the remaining download allowance plus 2 GiB.
+Use `.venv/bin/python -m proxybench fetch-source --help` for the command reference.
+
+### Inspect and import the filing
+
+Read downloaded HTML as text to prevent active content from running.
+Compare the downloaded document with its EDGAR filing entry.
+Make sure that the document contains the expected final section.
+Reject incomplete downloads, empty documents, and SEC error pages.
+Preserve the original bytes.
+A successful download alone does not establish completeness.
+
+After you inspect the complete document, choose its local filename and enter the actual retrieval date.
+The `--complete` flag records your decision that the document is complete.
+Import the inspected document:
+
+```bash
+read -r -p 'Local lowercase filename: ' PROXYBENCH_LOCAL_FILENAME
+read -r -p 'Retrieval date (YYYY-MM-DD): ' PROXYBENCH_RETRIEVAL_DATE
+
+.venv/bin/python -m proxybench import-source \
+  --input "data/downloads/$PROXYBENCH_ACCESSION/$PROXYBENCH_ORIGINAL_FILENAME" \
+  --project-root . \
+  --url "$PROXYBENCH_SOURCE_URL" \
+  --accession "$PROXYBENCH_ACCESSION" \
+  --filename "$PROXYBENCH_LOCAL_FILENAME" \
+  --retrieval-date "$PROXYBENCH_RETRIEVAL_DATE" \
+  --complete
+```
+
+The command copies unchanged bytes into `data/raw/` and records the source in `data/source-manifest.json`.
+The manifest also records the supplied URL, accession number, retrieval date, and original filename.
+Use `.venv/bin/python -m proxybench import-source --help` for optional filing metadata.
+Continue with [manual target selection](#manual-target-selection), then [label review and acceptance](#label-review-and-acceptance).
+
 Importing a local source does not authorize public redistribution.
+Follow the [release guide](release.md) before publishing a project source archive.
 
 ## Manual target selection
 
@@ -30,7 +115,6 @@ Select one separately voted subject and its disclosed reporting scope.
 Use the original source to choose byte ranges, an ordered sequence of source spans, and the target boundary.
 Ranges use zero-based offsets with an excluded end position.
 Keep the source encoding and SHA-256 hash with each selection.
-A hash identifies exact file content.
 
 Text spans preserve decoded characters and whitespace.
 HTML spans preserve ordered cells, empty cells, and row or column spans.
@@ -77,57 +161,5 @@ It needs no parent dataset or experiment output.
 The reader rebuilds each user message from its source selection and compares it with the saved message.
 It also checks source hashes, prompt bytes, row hashes, order, duplicate targets, labels, and exposure restrictions.
 Assistant labels remain unchanged during path migration.
-The source and label files remain private unless the user separately authorizes their exact release list.
+Without separate authorization for an exact release list, keep local source copies and label files out of Git.
 See the [release guide](release.md) for raw-source review.
-
-## Test-only preparation
-
-The [test configuration](../configs/testing.json) defines twelve records from twelve distinct filings and SEC filing years, 2013 through 2024.
-The 2024 record requires standardized disclosures in text or HTML, including an official SEC HTML view.
-Record the reporting period separately from the filing year.
-Apply the existing fourteen-field contract without adding standardized-only output fields.
-The test configuration fixes the scoring version before any predictions.
-
-Keep accepted test messages and their manifest under `data/testing-dataset/`.
-Use temporary files for selections, review records, and source audits before acceptance.
-The accepted manifest retains the required review and audit evidence.
-Retain the prior dataset and source inventory before acquiring test sources.
-Record candidate exclusions, amendment relationships, source comparisons, and coverage gaps in the private selection audit.
-Do not weaken year or source-independence requirements to fill a coverage gap.
-Keep a hash-bound provider-family audit that covers prior sources, exposed accessions, and each test candidate.
-Use `family_id` for a reviewed provider identity shared by related funds.
-Do not treat a new registrant identifier as proof of an unexposed provider.
-
-Use `python -m proxybench prepare-test --help` for protected test preparation.
-Supply selections, the test configuration, and the source audit.
-For context from another document, supply `context_sources` with the same accession and an explicit association review.
-Retain each document's original bytes, hash, URL, encoding, and source ranges.
-
-Preparation reserves filing, source-group, registrant, and file identities in `data/test-source-ledger.json` before review.
-It also protects other admitted attachments from the same filing.
-Keep this ledger even when labels remain drafts.
-Ordinary preparation and the training reader reject protected sources, including attached context and matching file bytes.
-The ledger also retains reviewed `family_id` values without changing older group reservations.
-
-Review source context before revealing draft labels.
-Require independent agent review of drafts and scripts before handoff.
-Explicit user acceptance must bind the exact review hash, preparation hash, and ordered packet IDs.
-Use `python -m proxybench accept-test --help` only after that acceptance.
-
-The accepted test dataset uses schema `test-dataset-v1`.
-Its folder contains only `test-examples.jsonl` and `dataset-manifest.json`.
-The manifest retains the exact review, approval, and preparation text with their hashes.
-It also retains the accepted audit documents, source identity records, and protection metadata.
-Preparation paths in these records identify frozen evidence, not files that evaluation must read.
-Eligibility checks use live source and exposure records before acceptance.
-Finalized loading uses the accepted evidence and rebuilds inputs directly from the original test files.
-It needs no preparation folder, parent training dataset, prior raw filings, or live source inventory.
-Raw test sources, canonical policies, and the protection ledger remain required.
-Each example keeps the same `system`, `user`, and `assistant` message order as training examples.
-The test reader rebuilds sources and checks the exact acceptance record before evaluation.
-Evaluation refuses a scoring version that differs from the accepted test configuration.
-
-Evaluation selects the test split from this schema and sends only `system` and `user` messages to the model.
-Do not use test results to select prompts, models, thresholds, or replacement records.
-Identify later development-driven evaluations as regression testing, which checks behavior after changes, rather than an untouched test.
-This small, deliberately varied batch does not establish population accuracy or exclusion from base-model pretraining.
