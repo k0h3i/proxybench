@@ -6,9 +6,34 @@ from proxybench.execution.resources import durable_json, host_memory
 
 def tensor_hash(tensor):
     import torch
-    return hashlib.sha256(tensor.detach().contiguous().view(torch.uint8).cpu().numpy().tobytes()).hexdigest()
+    return hashlib.sha256(tensor.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
 
-def merge_model(model, prompt, output):
+
+def tensor_isfinite(tensor, *, chunk_elements=1024**2):
+    """Inspect every value without allocating a full-sized device temporary."""
+    import torch
+    if not isinstance(chunk_elements, int) or chunk_elements < 1:
+        raise ValueError('Finite-check chunk size must be a positive integer')
+    pending = [tensor.detach()]
+    while pending:
+        part = pending.pop()
+        if part.numel() <= chunk_elements:
+            if not torch.isfinite(part).all().item():
+                return False
+        elif part.is_contiguous():
+            flat = part.view(-1)
+            for start in range(0, flat.numel(), chunk_elements):
+                if not torch.isfinite(flat[start:start + chunk_elements]).all().item():
+                    return False
+        else:
+            # Narrow creates views, including for transposed or strided weights.
+            dimension = max(range(part.ndim), key=lambda axis: part.shape[axis])
+            middle = part.shape[dimension] // 2
+            pending.append(part.narrow(dimension, middle, part.shape[dimension] - middle))
+            pending.append(part.narrow(dimension, 0, middle))
+    return True
+
+def merge_model(model, prompt, output, *, phase=None):
     """Inspect and merge one disposable instance with structural diagnostics."""
     import torch
     import time
@@ -46,20 +71,28 @@ def merge_model(model, prompt, output):
             values.append(dict(row=row, col=col, base=weight[row,col].item(),
                                delta_float32=delta.item(), expected_float32=(weight[row,col].float()+delta).item()))
         samples[name] = dict(dtype=str(weight.dtype), active=active, scaling=module.scaling['default'], points=values)
+    if phase is not None:
+        phase('hashing base weights')
     for name, p in base.named_parameters():
         if 'lora_' not in name:
             before[name.replace('.base_layer.', '.')] = tensor_hash(p)
     ids = torch.tensor([prompt], dtype=torch.long, device=next(base.parameters()).device)
+    if phase is not None:
+        phase('reference inference')
     with torch.inference_mode():
         reference = base(input_ids=ids, use_cache=False, logits_to_keep=1).logits[:, -1].float().cpu()
     if not torch.isfinite(reference).all():
         raise ValueError('Nonfinite reference scores')
+    if phase is not None:
+        phase('safe merge')
     merged = model.merge_and_unload(safe_merge=True)
     if any('lora_' in name for name, _ in merged.named_parameters()):
         raise ValueError('Adapter tensors remain after merge')
     after = {}
+    if phase is not None:
+        phase('checking merged weights')
     for name, p in merged.named_parameters():
-        if not torch.isfinite(p).all():
+        if not tensor_isfinite(p):
             raise ValueError('Nonfinite merged tensor')
         after[name] = tensor_hash(p)
     if set(before) != set(after):
@@ -71,6 +104,8 @@ def merge_model(model, prompt, output):
         if name in samples:
             for point in samples[name]['points']:
                 point['actual'] = module.weight[point['row'], point['col']].item()
+    if phase is not None:
+        phase('merged inference')
     with torch.inference_mode():
         candidate = merged(input_ids=ids, use_cache=False, logits_to_keep=1).logits[:, -1].float().cpu()
     if not torch.isfinite(candidate).all():

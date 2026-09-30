@@ -6,12 +6,11 @@ import uuid
 
 from proxybench.execution.resources import durable_json, host_memory
 from proxybench.training.checkpoints import validate_checkpoint
-from proxybench.training.merge import tensor_hash
+from proxybench.training.merge import tensor_hash, tensor_isfinite
 from proxybench.training.adapters import digest
 
 
 def publish_merged(model, tokenizer, directory, expected_hashes, *, shard_bytes=256 * 1024**2):
-    import torch
     from safetensors import safe_open
     from safetensors.torch import save_file
 
@@ -58,10 +57,12 @@ def publish_merged(model, tokenizer, directory, expected_hashes, *, shard_bytes=
         nbytes = parameter.numel() * parameter.element_size()
         if size and size + nbytes > shard_bytes:
             flush()
-        if not torch.isfinite(parameter).all() or tensor_hash(parameter) != expected_hashes[name]:
+        cpu_parameter = parameter.detach().to(device='cpu', copy=True).contiguous()
+        if not tensor_isfinite(cpu_parameter) or tensor_hash(cpu_parameter) != expected_hashes[name]:
             raise ValueError(f'Merged value differs: {name}')
         inventory[name] = dict(shape=list(parameter.shape), dtype=str(parameter.dtype), sha256=expected_hashes[name])
-        batch[name] = parameter.detach().to(device='cpu', copy=True).contiguous()
+        batch[name] = cpu_parameter
+        del cpu_parameter
         size += nbytes
         if size >= shard_bytes:
             flush()

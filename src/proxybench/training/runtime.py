@@ -400,9 +400,9 @@ def export_adapter(adapter, output, config):
         raise ValueError('Adapter tokenizer differs from the pinned base tokenizer')
     FastLanguageModel.for_inference(model)
     model.eval()
-    phase('serialization')
-    model = merge_model(model, prompt, output)
+    model = merge_model(model, prompt, output, phase=phase)
     expected = json.loads((output/'merge.json').read_text())['after']
+    phase('serialization')
     return publish_merged(model, restored, output/'merged', expected)
 
 
